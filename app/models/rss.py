@@ -1,0 +1,68 @@
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class RssSource(BaseModel):
+    source_id: str
+    market_level: str = ""
+    publisher: str = ""
+    desk: str = ""
+    category: str = ""
+    zh_name: str = ""
+    description: str = ""
+    feed_url: str
+    raw_status: str = ""
+    health_status: str = "unknown"
+    is_fetchable: bool = True
+    last_checked_at: str = ""
+    synced_at: str = ""
+    last_seen_in_sheet_at: str = ""
+    last_ingested_at: str = ""
+    last_ingest_status: str = ""
+    last_ingest_item_count: int = 0
+    last_ingest_new_item_count: int = 0
+    last_ingest_updated_item_count: int = 0
+    last_ingest_duration_ms: int = 0
+    last_ingest_fetch_duration_ms: int = 0
+    last_ingest_write_duration_ms: int = 0
+    last_ingest_skipped_old_item_count: int = 0
+    last_ingest_error: str = ""
+    consecutive_ingest_failures: int = 0
+
+
+class RssItem(BaseModel):
+    item_id: str
+    source_id: str
+    publisher: str = ""
+    desk: str = ""
+    category: str = ""
+    market_level: str = ""
+    title: str
+    url: str = ""
+    guid: str = ""
+    summary: str = ""
+    published_at: Optional[str] = None
+    first_seen_at: str
+    last_seen_at: str
+    content_hash: str
+    feed_url: str = ""
+
+
+class RssIngestRun(BaseModel):
+    run_id: str
+    started_at: str
+    completed_at: str
+    source_count: int
+    fetched_source_count: int
+    failed_source_count: int
+    new_item_count: int
+    updated_item_count: int
+    error_count: int
+    errors: list[dict[str, str]]
+    duration_ms: int = 0
+    timeout_seconds: int = 10
+    max_workers: int = 10
+    window_start: Optional[str] = None
+    skipped_old_item_count: int = 0
+    source_results: list[dict[str, object]] = Field(default_factory=list)

@@ -1,0 +1,15 @@
+.env
+.env.local
+.secrets/
+*_token.json
+google_oauth_token.json
+client_secret.json
+podcast-project-*.json
+*-service-account*.json
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+*.log
+.pytest_cache/

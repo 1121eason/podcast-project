@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/uvicorn app.main:app --port 8000)",
+      "Bash(echo \"started pid=$!\")",
+      "Bash(curl -s -o /dev/null -w \"health=%{http_code}\\\\n\" http://localhost:8000/sources/rss/health)",
+      "Read(//private/tmp/**)",
+      "Bash(python3 -c \"import uvicorn, fastapi; print\\('ok'\\)\")",
+      "Read(//Library/Frameworks/Python.framework/Versions/3.11/bin/**)",
+      "Bash(.venv/bin/python3 -m uvicorn app.main:app --port 8000)",
+      "Bash(echo \"pid=$!\")",
+      "Bash(curl -s http://localhost:8000/sources/rss/health)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3)",
+      "Bash(curl -s \"http://localhost:8000/sources/rss/signal-report?since_hours=24\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"http://localhost:8000/sources/rss/signal-report?since_hours=168\" -o /tmp/report.json)",
+      "Bash(kill %1)",
+      "Bash(lsof -i :8000 -sTCP:LISTEN -t)",
+      "Bash(xargs -r kill)",
+      "Bash(.venv/bin/python3 -c ' *)",
+      "Bash(.venv/bin/python3)",
+      "Bash(grep -rn -lE \"BEGIN.{0,20}PRIVATE KEY|sk-[a-zA-Z0-9]{20,}|AIza[A-Za-z0-9_-]{20,}\" --include=\"*.py\" --include=\"*.md\" --include=\"*.json\" --include=\"*.txt\" --include=\"*.yml\" --include=\"*.yaml\" --exclude-dir=\".venv\" --exclude-dir=\".git\" --exclude-dir=\"__pycache__\" --exclude-dir=\".secrets\")",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(grep -iE \"\\\\.env$|\\\\.env\\\\.local|client_secret|service-account|oauth_token|\\\\.secrets|podcast-project.*\\\\.json\")"
+    ]
+  }
+}
