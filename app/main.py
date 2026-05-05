@@ -1,11 +1,6 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
-from app.core.config import settings
-from app.api import routes_jobs
-from app.api import routes_sources
-
 
 def _materialize_credential_files() -> None:
     import logging
@@ -34,6 +29,11 @@ def _materialize_credential_files() -> None:
 
 
 _materialize_credential_files()
+
+from fastapi import FastAPI
+from app.core.config import settings
+from app.api import routes_jobs
+from app.api import routes_sources
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
