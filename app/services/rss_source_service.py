@@ -178,5 +178,4 @@ def sync_rss_sources_from_sheet() -> dict[str, object]:
         "duplicate_sheet_id_count": duplicate_sheet_id_count,
         "required_fetchable_status": FETCHABLE_STATUS,
         "synced_at": synced_at,
-        "sources": [source.model_dump() for source in sources],
     }
