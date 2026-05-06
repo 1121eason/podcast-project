@@ -8,10 +8,13 @@ This document captures the full pipeline from RSS source registry to editorial b
 |---|---|---|
 | 1 | RSS pipeline v1 — sync, ingest, observation report | Done, in production |
 | 2 | Signal clustering — embeddings + Agglomerative clustering | Done, in production |
-| 3 | Cross-verification + importance judgement | Designed, ready to start |
+| 3 | Cross-verification + importance judgement | Code done, prompt iterating, backfill in progress |
 | 4 | Business impact reasoning + editorial briefing | Outline |
 | 5 | Integration with existing daily briefing flow | Outline |
-| 6 | Source pool expansion (option A) | Backlog, do alongside Phase 3-5 |
+| 6 | Tier 1 source expansion (immediate, RSS adds) | Adopted, do alongside Phase 3–5 |
+| 7 | Tier 2 collection (watchlist, RSSHub routes, X / Reddit) | Outline, after Phase 4 |
+| 8 | Tier 3 collection (active research, structured APIs, alt data) | Outline, after Phase 5 |
+| 9 | Tier 4 paid data (Bloomberg, Refinitiv, etc.) | Deferred until paying customers |
 
 Each phase must satisfy its completion criteria before the next phase starts. Backlog items can run alongside.
 
@@ -286,54 +289,256 @@ No new code modules. Service-layer rewiring only.
 
 ---
 
-## Phase 6 — Source Pool Expansion (Backlog, Option A)
+## Information Collection Strategy
 
-### Goal
+This section captures the long-horizon plan for what data we collect, why, and how. The current system (Phase 1+2) only sees what its 127 RSS sources publish; everything beyond that is a known blind spot. The strategy is layered into four tiers by cost / effort / value, and supplemented with a governance layer.
 
-Reduce blind spots without changing the pipeline architecture. The existing system can only see what its 127 RSS sources see; this phase adds the highest-value low-effort sources.
+### Current State Inventory
 
-### Approach
+127 fetchable RSS sources roughly distributed as:
+- Western finance (Reuters / Bloomberg / WSJ / FT / CNBC / MarketWatch): ~30%
+- Western general (NYT / BBC / Guardian / AP): ~15%
+- Taiwan finance (鉅亨 / MoneyDJ / 經濟日報 / Digitimes): ~25%
+- Taiwan general (中央社 / 天下 / Yahoo奇摩): ~10%
+- Asia finance (Nikkei / 香港經濟日報 / RTHK): ~10%
+- Europe general (Le Monde / Economist): ~5%
+- Other: ~5%
 
-Stay within the existing RSS pipeline. Either:
-- Find official RSS / Atom feeds and add them to the Google Sheet `RSS List`.
-- Or use the existing self-hosted RSSHub (`easonn.zeabur.app`) to convert non-RSS sites into feeds.
+Known blind spots:
+- Official primary sources (Fed, SEC, TWSE, 公開資訊觀測站): media lag 30 min – 6 hours.
+- Government regulation original text.
+- Industry hard data (monthly revenue, BLS jobs, ISM PMI, semiconductor shipments).
+- Tech / research (arXiv, CVE, framework releases).
+- Breaking events that surface on Twitter / Reddit / HN before media coverage.
+- Cross-domain weak signals (e.g. Indonesia nickel policy → EV battery supply chain → Tesla).
+- Paid-only data (Bloomberg Terminal, Refinitiv, alternative data).
 
-### First-wave additions (estimated 15–25 new sources)
+---
 
-Official primary sources (highest signal):
-- SEC EDGAR full-text feed
-- Federal Reserve press releases (`federalreserve.gov/feeds/press_all.xml`)
-- ECB press releases
-- TWSE 公開資訊觀測站 — needs RSSHub adapter
-- Bureau of Labor Statistics news releases
+## Phase 6 — Tier 1: Immediate Source Expansion (Adopted, Option A)
 
-Tech / research:
-- arXiv categories relevant to AI / semiconductors
-- Hacker News top stories
-- GitHub trending (RSSHub)
+Cost 0, effort low, value high. Stay inside the existing RSS pipeline. Two paths: add official RSS / Atom feeds directly to the Google Sheet, or use the self-hosted RSSHub (`easonn.zeabur.app`) to convert non-RSS sites into feeds.
 
-Government / regulation:
-- White House briefing room
-- EU Commission press releases
-- 台灣經濟部 / 金管會 — needs RSSHub adapter
+### T1.1 Official primary sources
 
-### Decision
+| Source | Feed URL or note | Why |
+|---|---|---|
+| Federal Reserve | `federalreserve.gov/feeds/press_all.xml` | Most important global central bank decisions |
+| ECB Press Releases | RSS via ECB site | Eurozone monetary policy |
+| SEC EDGAR | `sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom` | US public-company 8-K / 10-Q in real time |
+| 公開資訊觀測站 | RSSHub adapter | Taiwan public-company filings |
+| TWSE 重大訊息 | RSSHub adapter | Taiwan stock exchange disclosures |
+| White House Briefing Room | `whitehouse.gov/briefing-room/feed/` | US executive policy original text |
+| EU Commission Press | `ec.europa.eu/commission/presscorner/api/rss` | EU regulation |
+| BLS news releases | `bls.gov/feed/news_release/all_nr.rss` | US employment / inflation data |
 
-Adopted as Option A (the cheapest, simplest, most aligned with existing pipeline). Done alongside Phase 3 / 4 / 5 — does not block any of them.
+### T1.2 Tech and research
 
-### Not Adopted (recorded for future reference)
+| Source | URL | Use |
+|---|---|---|
+| Hacker News top | `news.ycombinator.com/rss` | Tech-community attention signal |
+| arXiv cs.AI | `export.arxiv.org/rss/cs.AI` | New AI papers |
+| arXiv cs.CR | `export.arxiv.org/rss/cs.CR` | Security research |
+| GitHub trending | RSSHub adapter | New popular projects |
+| The Verge | `theverge.com/rss/index.xml` | Consumer tech |
+| Ars Technica | `arstechnica.com/feed/` | Deeper tech coverage |
 
-- Option B: event-driven triggers (X / Reddit / HN watchers) — defer until Phase 4 stable
-- Option C: active research mode (Gemini Search grounding for daily blind-spot scan) — defer until Phase 5 stable, only useful when budget can support $10–30/month extra
-- Option D: explicit watchlist (per-topic must-answer questions) — high value but high build cost, defer until clear blind-spot patterns emerge
+### T1.3 Source pool hygiene
 
-### What Phase 6 Cannot Cover
+- Remove 14 flaky sources (recovered in Apps Script health check but consistently fail at ingest).
+- Mark silent sources (zero output for one week) as non-fetchable.
+- Net effect: fetchable count drops from 127 to ~110, but signal quality rises.
 
-Even after Phase 6 expansion, the following remain blind:
-- Internal company information not yet public
-- Paid data sources (Bloomberg Terminal, Refinitiv, Glassnode, etc.)
-- Cross-language low-coverage markets (Eastern Europe, Middle East, Africa)
-- Real leading indicators (satellite imagery, credit card data, job posting scrapes)
+### Tier 1 cost
+
+$0 dollars, half a day of operator effort, ~25 new high-value sources, ~17 source removals. Net source quality up.
+
+---
+
+## Phase 7 — Tier 2: Mid-term Collection (1–2 weeks of dev each)
+
+These add new mechanisms, not just sources. Pick up after Phase 4 ships.
+
+### T2.1 Watchlist (explicit must-answer questions)
+
+A list of questions the system must answer or flag every day. Examples:
+
+- Did TSMC release monthly revenue today?
+- Are there any Fed / ECB / BoJ public speeches this week?
+- What was last Thursday's Initial Jobless Claims?
+- Is FOMC scheduled today?
+- Which S&P 500 companies report earnings this week?
+- Did Apple / NVIDIA / TSMC release any major announcements today?
+- Did the EU AI Act publish a new amendment?
+
+Each watchlist item is a tuple of `(source_type, source_url, expected_pattern, response_schema)`. A scheduler runs every 1–4 hours, hits the source, extracts a structured response, and writes to `watchlist_responses`. "No update" is also a recorded response.
+
+Output: a daily "Watchlist Daily" report listing each question and its current answer (or absence thereof).
+
+Estimated dev: 1–2 weeks. LLM cost: ~$5/month.
+
+### T2.2 Self-hosted RSSHub route extensions
+
+Convert sites that don't publish RSS into feeds. Targets:
+- 公開資訊觀測站 (Taiwan public filings)
+- 台灣經濟部 / 金管會 / 央行
+- 香港交易所 disclosures
+- 中國證監會 announcements
+
+Each route ~1–2 hours dev. Operator effort 5–10 hours total.
+
+### T2.3 Twitter / X account watch
+
+Lock onto specific accounts: official handles (@federalreserve, @SECGov, @Treasury, @ECB), policy figures (@Yellen, @realDonaldTrump), key journalists (@DealBook, @WSJecon, @FTAlphaville), top PMs / analysts (curated 5–10).
+
+Options:
+- Paid X API: $100+/month, reliable.
+- Free: nitter mirrors converted to RSS via RSSHub.
+
+Decision deferred until X API budget warrants the latency improvement (currently RSS sources cover the same news 30–60 min later).
+
+### T2.4 Reddit / HN trending
+
+- `r/wallstreetbets`, `r/economics`, `r/investing`, `r/technology` top RSS feeds.
+- Already partly covered by Tier 1 HN. Reddit feeds add retail-investor sentiment and tech-community attention.
+
+---
+
+## Phase 8 — Tier 3: Longer-term Collection (3–4 weeks of dev each, requires stable foundation)
+
+Only useful after Phase 5 (full editorial pipeline) ships and is stable.
+
+### T3.1 Active research (editor-in-chief mode)
+
+Each morning:
+1. Show Gemini today's RSS-derived clusters (~200).
+2. Ask Gemini: "What should be tracked today that this list does not cover?"
+3. For each missing topic Gemini proposes, run Gemini with Search Grounding to find the answer.
+4. Convert findings into synthetic signals and merge with the RSS signal pool.
+
+Cost: $10–30/month (Search Grounding + Gemini Pro). Defer until Phase 5 ships and routine costs are stable.
+
+### T3.2 Structured data APIs (numbers, not text)
+
+| API | Use | Cost |
+|---|---|---|
+| FRED API | US macro time series (rates, GDP, CPI, employment) | Free |
+| Yahoo Finance / Stooq | Equities prices | Free |
+| TWSE / TPEx API | Taiwan stock data | Free |
+| Coingecko | Crypto | Free |
+| Alpha Vantage / IEX | US equities real-time | Free tier |
+
+Goal: pair each event signal with same-day market reaction. Lets you read "how much was already priced in" alongside the news itself.
+
+### T3.3 Alternative data (high cost, high signal)
+
+| Source | Use | Cost |
+|---|---|---|
+| Planet Labs (satellite) | Parking-lot traffic, port activity | $$$$ |
+| Glassnode (on-chain) | Crypto whale movements | $200+/month |
+| Second Measure (credit card) | Real consumer spend trends | $$$$ |
+| Apptopia (app downloads) | Product health proxy | $$ |
+
+Listed for awareness only. Defer until clear use case + budget approval.
+
+### T3.4 Cross-language coverage gaps
+
+Current pipeline is English + Traditional Chinese heavy. Possible additions:
+- Mainland China: 21 世紀經濟報導 / 財新 / 新華社 (via RSSHub)
+- Non-English Europe: Handelsblatt / FAZ
+- Korea: Yonhap economy
+- Southeast Asia: The Straits Times / Nikkei Asia
+
+Precondition: operator can read or trust the language. Skip unless someone reviews routinely.
+
+---
+
+## Phase 9 — Tier 4: Paid Data (Executive Decision)
+
+| Source | Approx cost | Use |
+|---|---|---|
+| Bloomberg Terminal | $24,000/year | First-hand news, real-time data, analyst reports |
+| Refinitiv Eikon | similar | Bloomberg competitor |
+| S&P Capital IQ | $$$ | Deep company financials |
+| FactSet | $$$ | Same as above |
+| The Information | $$/month | Tech exclusives |
+| Bloomberg Pro subscription | $40/month | Cheapest Bloomberg entry |
+
+Not on the roadmap until MVP has paying customers. The constraint today is "too much information to process," not "not enough information."
+
+---
+
+## Governance Layer (cross-cutting, applies to all tiers)
+
+### G.1 Source rating
+
+Add fields to the Google Sheet `RSS List`:
+
+| Field | Meaning |
+|---|---|
+| `tier` | 1 (primary) / 2 (media) / 3 (small / mirror) |
+| `desk` | Market / Tech / Policy / Industry |
+| `expected_cadence` | daily / weekly / monthly / event-driven |
+| `bias_note` | known orientation (left / right / industry skew) |
+
+Importance judgement should weight tier 1 sources higher than tier 3 for the same content.
+
+### G.2 Noise blacklist
+
+Pattern-based deweighting:
+- Title contains "業配" / "廣編" / "advertorial" → cap importance at 0.
+- Publisher on a known low-quality list → cap at 30.
+- Title is a digest / roundup ("快訊整理", "今日要聞") → cap at 50.
+
+### G.3 Source rotation cycle
+
+Weekly review, automated where possible:
+- Silent sources (>7 days zero output) → flag for removal.
+- Flaky sources (>7 days >50% ingest fail rate) → flag for removal.
+- New-source trial (added in last 14 days) → keep / drop decision.
+
+Add `review_status` column to the Sheet.
+
+### G.4 Coverage heatmap
+
+Daily Report adds a section:
+
+```
+Today desk coverage:
+  Macro/Policy:    25 events  ← healthy
+  Corporate (US):  80 events  ← healthy
+  Corporate (TW):  60 events  ← healthy
+  Tech:            30 events
+  Industry:        15 events  ← low, consider adding sources
+  Asia (ex TW):     5 events  ← critically low, missing Nikkei/SCMP/Yonhap
+  Europe:           3 events  ← critically low, missing Le Monde/FAZ
+```
+
+Reviewed weekly; gaps trigger Tier 1 / 2 source additions.
+
+---
+
+## Phase Hard Limits (after all tiers)
+
+Even with everything above implemented, the following remain unobservable without paid data or human network:
+- Internal company information before public disclosure.
+- Bloomberg Terminal exclusives that never leak to public web.
+- True leading indicators (satellite, on-chain, credit card flow).
+- The intent behind why a story is breaking now versus six months ago.
+
+These are the boundaries. Acknowledge them; do not pretend the pipeline can fill them.
+
+---
+
+## Action Sequencing
+
+| Window | Focus |
+|---|---|
+| This week (Phase 3 wrap) | T1.1 + T1.2 (add ~25 RSS sources), T1.3 (prune flaky / silent) |
+| Next week (Phase 4 dev) | T2.2 (RSSHub routes), G.1 (source rating fields) |
+| After Phase 4 ships | T2.1 Watchlist, T3.2 structured data APIs |
+| After Phase 5 ships | T3.1 active research, T2.3 X watch (if budget allows) |
+| TBD by paying-customer milestone | Phase 9 Tier 4 paid data |
 
 ---
 
@@ -381,6 +586,10 @@ OpenAI A/B is possible but not required. Default stays on Google given the exist
 | 2026-05-07 | Switch Phase 2 to every 1h with 4h window (overlap) | New items reach clusters within 1h instead of 4h |
 | 2026-05-07 | Phase 3 plan finalized; topic_heat added as second dimension separate from cluster_status | Avoids conflating "popular" with "important" |
 | 2026-05-07 | Phase 6 (source expansion) adopted as Option A only | Cheapest, simplest, aligned with existing pipeline |
+| 2026-05-07 | Phase 3 prompt v1 deployed; small-batch test showed event-vs-context mis-anchoring | LLM scored a market-wrap article 90 because body mentioned Iran |
+| 2026-05-07 | Phase 3 v2 (prompt restructure) insufficient; LLM still ignored explicit rule | Need code-level enforcement, not just prompt instruction |
+| 2026-05-07 | Phase 3 v3 (prompt v2 + code guard rails) shipped: market-wrap regex caps importance ≤ 45; non-systemic single-source earnings caps ≤ 65; summary truncated 1000 → 300 chars | Validated by re-judge: 歐股盤後 dropped out of top60, Fortinet 72→65 |
+| 2026-05-07 | Information collection strategy expanded into tiered roadmap (Phase 6/7/8/9) | Captures full long-horizon plan; previous Phase 6 was too narrow |
 
 ---
 
