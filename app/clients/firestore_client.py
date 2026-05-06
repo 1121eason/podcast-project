@@ -4,6 +4,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from app.core.config import settings
 from app.models.job import JobRecord
 from app.models.rss import RssIngestRun, RssItem, RssSource
+from app.models.signal import RssClusteringRun, RssSignal
 from typing import Optional
 
 from app.core.logging import logger
@@ -241,5 +242,188 @@ class FirestoreClient:
             logger.warning("Firestore not initialized, skipping create_rss_ingest_run")
             return
         self.db.collection("rss_ingest_runs").document(run.run_id).set(run.model_dump())
+
+    def list_rss_items_pending_embedding(self, since_iso: str, limit: int = 1000) -> list[RssItem]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty pending embedding items")
+            return []
+
+        collection = self.db.collection("rss_items")
+        items_by_id: dict[str, RssItem] = {}
+        for field in ("first_seen_at", "published_at"):
+            query = collection.where(filter=FieldFilter(field, ">=", since_iso)).limit(limit)
+            for doc in query.stream():
+                data = doc.to_dict()
+                if not data:
+                    continue
+                if data.get("embedded_at"):
+                    continue
+                item = RssItem(**data)
+                items_by_id[item.item_id] = item
+        return list(items_by_id.values())
+
+    def list_rss_items_with_embedding(self, since_iso: str) -> list[RssItem]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty rss_items with embedding")
+            return []
+
+        collection = self.db.collection("rss_items")
+        items_by_id: dict[str, RssItem] = {}
+        for field in ("first_seen_at", "published_at"):
+            query = collection.where(filter=FieldFilter(field, ">=", since_iso))
+            for doc in query.stream():
+                data = doc.to_dict()
+                if not data:
+                    continue
+                if not data.get("embedded_at"):
+                    continue
+                if not data.get("embedding"):
+                    continue
+                item = RssItem(**data)
+                items_by_id[item.item_id] = item
+        return list(items_by_id.values())
+
+    def update_rss_item_embeddings(
+        self,
+        embeddings: dict[str, tuple[list[float], str, str]],
+    ) -> int:
+        """
+        embeddings: {item_id: (embedding, embedding_model, embedded_at)}
+        """
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping update_rss_item_embeddings")
+            return 0
+        if not embeddings:
+            return 0
+
+        collection = self.db.collection("rss_items")
+        batch = self.db.batch()
+        operation_count = 0
+        written = 0
+        embedding_batch_limit = 100
+        for item_id, (vector, model, ts) in embeddings.items():
+            batch.update(
+                collection.document(item_id),
+                {
+                    "embedding": vector,
+                    "embedding_model": model,
+                    "embedded_at": ts,
+                },
+            )
+            operation_count += 1
+            written += 1
+            if operation_count >= embedding_batch_limit:
+                batch.commit()
+                batch = self.db.batch()
+                operation_count = 0
+        if operation_count:
+            batch.commit()
+        return written
+
+    def update_rss_item_signal_ids(self, item_id_to_signal_id: dict[str, str]) -> int:
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping update_rss_item_signal_ids")
+            return 0
+        if not item_id_to_signal_id:
+            return 0
+
+        collection = self.db.collection("rss_items")
+        batch = self.db.batch()
+        operation_count = 0
+        for item_id, signal_id in item_id_to_signal_id.items():
+            batch.update(collection.document(item_id), {"signal_id": signal_id})
+            operation_count += 1
+            if operation_count >= 450:
+                batch.commit()
+                batch = self.db.batch()
+                operation_count = 0
+        if operation_count:
+            batch.commit()
+        return len(item_id_to_signal_id)
+
+    def upsert_rss_signals(self, signals: list[RssSignal]) -> int:
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping upsert_rss_signals")
+            return 0
+        if not signals:
+            return 0
+
+        collection = self.db.collection("rss_signals")
+        batch = self.db.batch()
+        operation_count = 0
+        for signal in signals:
+            batch.set(collection.document(signal.signal_id), signal.model_dump())
+            operation_count += 1
+            if operation_count >= 450:
+                batch.commit()
+                batch = self.db.batch()
+                operation_count = 0
+        if operation_count:
+            batch.commit()
+        return len(signals)
+
+    def list_recent_signals(self, since_iso: str, limit: int = 200) -> list[RssSignal]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty signals")
+            return []
+        query = (
+            self.db.collection("rss_signals")
+            .where(filter=FieldFilter("generated_at", ">=", since_iso))
+            .order_by("generated_at", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+        )
+        signals = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            if data:
+                signals.append(RssSignal(**data))
+        return signals
+
+    def get_signal_by_id(self, signal_id: str) -> Optional[RssSignal]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning None for get_signal_by_id")
+            return None
+        doc = self.db.collection("rss_signals").document(signal_id).get()
+        if doc.exists:
+            return RssSignal(**doc.to_dict())
+        return None
+
+    def list_rss_items_by_ids(self, item_ids: list[str]) -> list[RssItem]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty items by ids")
+            return []
+        if not item_ids:
+            return []
+        collection = self.db.collection("rss_items")
+        doc_refs = [collection.document(item_id) for item_id in item_ids]
+        items: list[RssItem] = []
+        for doc in self.db.get_all(doc_refs):
+            if doc.exists:
+                data = doc.to_dict() or {}
+                items.append(RssItem(**data))
+        return items
+
+    def create_clustering_run(self, run: RssClusteringRun):
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping create_clustering_run")
+            return
+        self.db.collection("rss_clustering_runs").document(run.run_id).set(run.model_dump())
+
+    def list_recent_clustering_runs(self, since_iso: str) -> list[RssClusteringRun]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty clustering runs")
+            return []
+        query = (
+            self.db.collection("rss_clustering_runs")
+            .where(filter=FieldFilter("generated_at", ">=", since_iso))
+            .order_by("generated_at", direction=firestore.Query.DESCENDING)
+        )
+        runs = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            if data:
+                runs.append(RssClusteringRun(**data))
+        return runs
+
 
 firestore_client = FirestoreClient()

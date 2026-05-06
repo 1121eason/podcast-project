@@ -47,6 +47,10 @@ class RssItem(BaseModel):
     last_seen_at: str
     content_hash: str
     feed_url: str = ""
+    embedding: Optional[list[float]] = None
+    embedding_model: Optional[str] = None
+    embedded_at: Optional[str] = None
+    signal_id: Optional[str] = None
 
 
 class RssIngestRun(BaseModel):

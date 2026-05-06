@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_TOKEN_FILE: str = ".secrets/google_oauth_token.json"
     GOOGLE_SHEET_ID: str = ""
     GOOGLE_SHEET_RANGE: str = "'RSS List'!A:J"
+    VERTEX_LOCATION: str = "us-central1"
+    EMBEDDING_MODEL: str = "text-embedding-004"
+    CLUSTERING_DISTANCE_THRESHOLD: float = 0.15
     model_config = SettingsConfigDict(env_file=(".env", ".env.local"), env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
