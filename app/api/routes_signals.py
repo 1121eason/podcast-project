@@ -104,29 +104,6 @@ def recent_signals(
     }
 
 
-@router.get("/{signal_id}")
-def signal_detail(signal_id: str):
-    signal = firestore_client.get_signal_by_id(signal_id)
-    if not signal:
-        raise HTTPException(status_code=404, detail="signal not found")
-    members = firestore_client.list_rss_items_by_ids(signal.member_item_ids)
-    return {
-        "signal": signal.model_dump(),
-        "members": [
-            {
-                "item_id": m.item_id,
-                "publisher": m.publisher,
-                "title": m.title,
-                "url": m.url,
-                "published_at": m.published_at,
-                "first_seen_at": m.first_seen_at,
-                "summary": m.summary,
-            }
-            for m in members
-        ],
-    }
-
-
 @router.get("/runs/clustering")
 def clustering_runs(since_hours: int = Query(default=48, ge=1, le=336)):
     runs = firestore_client.list_recent_clustering_runs(_since_iso(since_hours))
@@ -238,4 +215,27 @@ def judgement_runs(since_hours: int = Query(default=48, ge=1, le=336)):
         "since_hours": since_hours,
         "count": len(runs),
         "runs": [r.model_dump() for r in runs],
+    }
+
+
+@router.get("/{signal_id}")
+def signal_detail(signal_id: str):
+    signal = firestore_client.get_signal_by_id(signal_id)
+    if not signal:
+        raise HTTPException(status_code=404, detail="signal not found")
+    members = firestore_client.list_rss_items_by_ids(signal.member_item_ids)
+    return {
+        "signal": signal.model_dump(),
+        "members": [
+            {
+                "item_id": m.item_id,
+                "publisher": m.publisher,
+                "title": m.title,
+                "url": m.url,
+                "published_at": m.published_at,
+                "first_seen_at": m.first_seen_at,
+                "summary": m.summary,
+            }
+            for m in members
+        ],
     }
