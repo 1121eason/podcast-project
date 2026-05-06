@@ -52,7 +52,10 @@
       "Bash(.venv/bin/python3 -c \"from app.main import app; print\\('main imports ok'\\); print\\([r.path for r in app.routes if '/signals' in r.path]\\)\")",
       "Bash(.venv/bin/python3 -m unittest tests.test_rss_embedding_service tests.test_rss_clustering_service tests.test_signals_api)",
       "Bash(.venv/bin/python3 -m unittest discover -s tests)",
-      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 2: Add signal clustering with Vertex embedding pipeline\")"
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 2: Add signal clustering with Vertex embedding pipeline\")",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Refresh project plan: Phase 1-2 done, Phase 3 designed, Phase 6 source expansion\")",
+      "Bash(.venv/bin/python3 -c \"from app.main import app; print\\('imports ok'\\); print\\([r.path for r in app.routes if r.path.startswith\\('/signals'\\)]\\)\")",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 3: cross-verification + topic heat + LLM importance judgement\")"
     ]
   }
 }

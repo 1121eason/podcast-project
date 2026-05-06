@@ -4,7 +4,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from app.core.config import settings
 from app.models.job import JobRecord
 from app.models.rss import RssIngestRun, RssItem, RssSource
-from app.models.signal import RssClusteringRun, RssSignal
+from app.models.signal import RssClusteringRun, RssJudgementRun, RssSignal
 from typing import Optional
 
 from app.core.logging import logger
@@ -424,6 +424,55 @@ class FirestoreClient:
             if data:
                 runs.append(RssClusteringRun(**data))
         return runs
+
+    def create_judgement_run(self, run: RssJudgementRun):
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping create_judgement_run")
+            return
+        self.db.collection("rss_judgement_runs").document(run.run_id).set(run.model_dump())
+
+    def list_recent_judgement_runs(self, since_iso: str) -> list[RssJudgementRun]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty judgement runs")
+            return []
+        query = (
+            self.db.collection("rss_judgement_runs")
+            .where(filter=FieldFilter("generated_at", ">=", since_iso))
+            .order_by("generated_at", direction=firestore.Query.DESCENDING)
+        )
+        runs = []
+        for doc in query.stream():
+            data = doc.to_dict()
+            if data:
+                runs.append(RssJudgementRun(**data))
+        return runs
+
+    def list_top_signals(
+        self,
+        since_iso: str,
+        min_score: int = 0,
+        limit: int = 50,
+        status: Optional[str] = None,
+    ) -> list[RssSignal]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty top signals")
+            return []
+        query = self.db.collection("rss_signals").where(
+            filter=FieldFilter("generated_at", ">=", since_iso)
+        )
+        if status:
+            query = query.where(filter=FieldFilter("cluster_status", "==", status))
+        signals: list[RssSignal] = []
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            score = data.get("importance_score")
+            if score is None:
+                continue
+            if score < min_score:
+                continue
+            signals.append(RssSignal(**data))
+        signals.sort(key=lambda s: (s.importance_score or 0), reverse=True)
+        return signals[:limit]
 
 
 firestore_client = FirestoreClient()

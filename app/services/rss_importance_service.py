@@ -1,0 +1,259 @@
+import json
+import logging
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+from app.clients.firestore_client import firestore_client
+from app.clients.gemini_client import JUDGEMENT_MODEL, gemini_client
+from app.models.signal import RssJudgementRun, RssSignal
+from app.services.rss_source_service import utc_now_iso
+
+logger = logging.getLogger(__name__)
+
+_VALID_IMPACT_TYPES = {
+    "market",
+    "policy",
+    "corporate",
+    "tech",
+    "industry",
+    "macro",
+    "noise",
+}
+
+PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "importance_judgement_v1.txt"
+PROMPT_TEMPLATE: Optional[str] = None
+COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
+COST_PER_1K_OUTPUT_TOKENS = 10.0 / 1000
+
+
+def _load_prompt() -> str:
+    global PROMPT_TEMPLATE
+    if PROMPT_TEMPLATE is None:
+        PROMPT_TEMPLATE = PROMPT_PATH.read_text(encoding="utf-8")
+    return PROMPT_TEMPLATE
+
+
+def _since_iso(hours: int) -> str:
+    return (
+        (datetime.now(timezone.utc) - timedelta(hours=hours))
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _generate_run_id() -> str:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"judge_{ts}_{uuid.uuid4().hex[:8]}"
+
+
+def _render_prompt(signal: RssSignal) -> str:
+    template = _load_prompt()
+    return template.format(
+        representative_title=signal.representative_title or "(no title)",
+        representative_summary=(signal.representative_summary or "")[:1000],
+        representative_published_at=signal.representative_published_at or "(unknown)",
+        source_count=signal.source_count,
+        publisher_count=signal.publisher_count,
+        publishers=", ".join(signal.publishers or []),
+        cluster_status=signal.cluster_status or "unknown",
+        topic_heat=signal.topic_heat or "unknown",
+        market_levels=", ".join(signal.market_levels or []),
+        desks=", ".join(signal.desks or []),
+    )
+
+
+def _validate_payload(payload: dict) -> dict:
+    score = payload.get("importance_score")
+    if not isinstance(score, int):
+        try:
+            score = int(score)
+        except (TypeError, ValueError):
+            raise ValueError("importance_score is missing or not int")
+    if score < 0 or score > 100:
+        raise ValueError(f"importance_score out of range: {score}")
+
+    impact = payload.get("impact_type")
+    if impact not in _VALID_IMPACT_TYPES:
+        raise ValueError(f"impact_type invalid: {impact}")
+
+    key_entities = payload.get("key_entities") or []
+    if not isinstance(key_entities, list):
+        raise ValueError("key_entities must be list")
+    regions = payload.get("regions") or []
+    if not isinstance(regions, list):
+        raise ValueError("regions must be list")
+
+    reasoning = str(payload.get("reasoning") or "").strip()
+    note = str(payload.get("heat_vs_importance_note") or "").strip()
+
+    return {
+        "importance_score": int(score),
+        "impact_type": impact,
+        "key_entities": [str(x) for x in key_entities][:5],
+        "regions": [str(x) for x in regions][:5],
+        "reasoning": reasoning,
+        "heat_vs_importance_note": note,
+    }
+
+
+def _judge_one(signal: RssSignal) -> dict[str, object]:
+    prompt = _render_prompt(signal)
+    last_exc: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            payload, input_tokens, output_tokens = gemini_client.generate_json(prompt)
+            validated = _validate_payload(payload)
+            return {
+                "signal_id": signal.signal_id,
+                "ok": True,
+                "payload": validated,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+        except (json.JSONDecodeError, ValueError, KeyError) as exc:
+            last_exc = exc
+            logger.warning(
+                "Judge parse failed for %s attempt %d: %s",
+                signal.signal_id,
+                attempt + 1,
+                exc,
+            )
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "Judge call failed for %s attempt %d: %s",
+                signal.signal_id,
+                attempt + 1,
+                exc,
+            )
+    return {
+        "signal_id": signal.signal_id,
+        "ok": False,
+        "error": str(last_exc) if last_exc else "unknown",
+    }
+
+
+def _bucket_score(score: int) -> str:
+    if score >= 80:
+        return "score_80plus_count"
+    if score >= 60:
+        return "score_60_79_count"
+    if score >= 40:
+        return "score_40_59_count"
+    return "score_below_40_count"
+
+
+def judge_signals(
+    since_hours: int = 4,
+    max_workers: int = 5,
+    force: bool = False,
+    max_signals_per_run: int = 200,
+) -> dict[str, object]:
+    started = time.monotonic()
+    run_id = _generate_run_id()
+    generated_at = utc_now_iso()
+    since_iso = _since_iso(since_hours)
+
+    signals = firestore_client.list_recent_signals(since_iso, limit=2000)
+
+    candidates: list[RssSignal] = []
+    skipped_unverified = 0
+    skipped_already_judged = 0
+    for signal in signals:
+        if not signal.cluster_status:
+            skipped_unverified += 1
+            continue
+        if signal.importance_score is not None and not force:
+            skipped_already_judged += 1
+            continue
+        candidates.append(signal)
+
+    if max_signals_per_run > 0:
+        candidates = candidates[:max_signals_per_run]
+
+    score_counts = {
+        "score_80plus_count": 0,
+        "score_60_79_count": 0,
+        "score_40_59_count": 0,
+        "score_below_40_count": 0,
+    }
+    score_sum = 0
+    score_done = 0
+    failed = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    errors: list[dict[str, str]] = []
+    judged_signals: list[RssSignal] = []
+
+    if candidates:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_judge_one, s): s for s in candidates}
+            for future in as_completed(futures):
+                signal = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    failed += 1
+                    errors.append({"signal_id": signal.signal_id, "error": str(exc)})
+                    continue
+                if not result["ok"]:
+                    failed += 1
+                    errors.append(
+                        {"signal_id": result["signal_id"], "error": str(result.get("error"))}
+                    )
+                    continue
+                payload = result["payload"]
+                signal.importance_score = payload["importance_score"]
+                signal.impact_type = payload["impact_type"]
+                signal.key_entities = payload["key_entities"]
+                signal.regions = payload["regions"]
+                signal.reasoning = payload["reasoning"]
+                signal.heat_vs_importance_note = payload["heat_vs_importance_note"]
+                signal.judged_at = utc_now_iso()
+                signal.judge_model = JUDGEMENT_MODEL
+                signal.judge_input_tokens = result["input_tokens"]
+                signal.judge_output_tokens = result["output_tokens"]
+                judged_signals.append(signal)
+                score_done += 1
+                score_sum += payload["importance_score"]
+                score_counts[_bucket_score(payload["importance_score"])] += 1
+                total_input_tokens += result["input_tokens"]
+                total_output_tokens += result["output_tokens"]
+
+        firestore_client.upsert_rss_signals(judged_signals)
+
+    cost_usd = (
+        total_input_tokens / 1000 * COST_PER_1K_INPUT_TOKENS
+        + total_output_tokens / 1000 * COST_PER_1K_OUTPUT_TOKENS
+    )
+    duration_ms = int((time.monotonic() - started) * 1000)
+    avg_score = round(score_sum / score_done, 2) if score_done else 0.0
+
+    run = RssJudgementRun(
+        run_id=run_id,
+        generated_at=generated_at,
+        since_hours=since_hours,
+        candidate_signal_count=len(candidates),
+        judged_signal_count=score_done,
+        skipped_already_judged_count=skipped_already_judged,
+        skipped_unverified_count=skipped_unverified,
+        failed_signal_count=failed,
+        avg_score=avg_score,
+        score_80plus_count=score_counts["score_80plus_count"],
+        score_60_79_count=score_counts["score_60_79_count"],
+        score_40_59_count=score_counts["score_40_59_count"],
+        score_below_40_count=score_counts["score_below_40_count"],
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        total_cost_usd=round(cost_usd, 6),
+        duration_ms=duration_ms,
+        judge_model=JUDGEMENT_MODEL,
+        errors=errors[:10],
+    )
+    firestore_client.create_judgement_run(run)
+    return run.model_dump()

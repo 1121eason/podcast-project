@@ -1,0 +1,186 @@
+import unittest
+from unittest.mock import patch
+
+from app.models.signal import RssSignal
+from app.services import rss_importance_service
+
+
+def make_signal(**kwargs):
+    base = dict(
+        signal_id=kwargs.get("signal_id", "sig_test"),
+        generated_at="2026-05-07T00:00:00Z",
+        window_start="2026-05-06T20:00:00Z",
+        window_end="2026-05-07T00:00:00Z",
+        cluster_size=1,
+        source_count=1,
+        publisher_count=1,
+        publishers=kwargs.get("publishers", ["CNBC"]),
+        market_levels=kwargs.get("market_levels", ["Global"]),
+        cluster_status=kwargs.get("cluster_status", "single_source"),
+        topic_heat=kwargs.get("topic_heat", "low"),
+        representative_title=kwargs.get("representative_title", "Test title"),
+        representative_summary=kwargs.get("representative_summary", "Test summary"),
+        importance_score=kwargs.get("importance_score"),
+    )
+    return RssSignal(**base)
+
+
+class FakeFirestoreClient:
+    def __init__(self, signals):
+        self.signals = signals
+        self.upserted = []
+        self.run_record = None
+
+    def list_recent_signals(self, since_iso, limit=2000):
+        return list(self.signals)
+
+    def upsert_rss_signals(self, signals):
+        self.upserted.extend(signals)
+        return len(signals)
+
+    def create_judgement_run(self, run):
+        self.run_record = run
+
+
+class FakeGeminiClient:
+    def __init__(self, payload, input_tokens=400, output_tokens=80):
+        self.payload = payload
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.calls = []
+
+    def generate_json(self, prompt):
+        self.calls.append(prompt)
+        return self.payload, self.input_tokens, self.output_tokens
+
+
+class TestPromptRendering(unittest.TestCase):
+    def test_render_prompt_substitutes_fields(self):
+        signal = make_signal(
+            representative_title="Anthropic raises $1.5B",
+            publishers=["CNBC", "Reuters"],
+            market_levels=["Global"],
+        )
+        prompt = rss_importance_service._render_prompt(signal)
+        self.assertIn("Anthropic raises $1.5B", prompt)
+        self.assertIn("CNBC, Reuters", prompt)
+        self.assertIn("Global", prompt)
+
+
+class TestValidatePayload(unittest.TestCase):
+    def test_valid_payload(self):
+        out = rss_importance_service._validate_payload({
+            "importance_score": 75,
+            "impact_type": "market",
+            "key_entities": ["Anthropic", "Goldman"],
+            "regions": ["US"],
+            "reasoning": "AI funding",
+            "heat_vs_importance_note": "",
+        })
+        self.assertEqual(out["importance_score"], 75)
+        self.assertEqual(out["impact_type"], "market")
+
+    def test_missing_score_raises(self):
+        with self.assertRaises(ValueError):
+            rss_importance_service._validate_payload({
+                "impact_type": "market",
+                "key_entities": [],
+                "regions": [],
+                "reasoning": "x",
+            })
+
+    def test_invalid_impact_type_raises(self):
+        with self.assertRaises(ValueError):
+            rss_importance_service._validate_payload({
+                "importance_score": 50,
+                "impact_type": "weather",
+                "key_entities": [],
+                "regions": [],
+                "reasoning": "x",
+            })
+
+    def test_score_out_of_range(self):
+        with self.assertRaises(ValueError):
+            rss_importance_service._validate_payload({
+                "importance_score": 150,
+                "impact_type": "market",
+                "key_entities": [],
+                "regions": [],
+                "reasoning": "x",
+            })
+
+
+class TestJudgeFlow(unittest.TestCase):
+    def test_judge_writes_score(self):
+        signal = make_signal(
+            signal_id="s1",
+            cluster_status="confirmed",
+            topic_heat="high",
+        )
+        fake_fc = FakeFirestoreClient([signal])
+        fake_gemini = FakeGeminiClient({
+            "importance_score": 82,
+            "impact_type": "market",
+            "key_entities": ["Anthropic"],
+            "regions": ["US"],
+            "reasoning": "Big AI funding",
+            "heat_vs_importance_note": "",
+        })
+
+        with patch.object(rss_importance_service, "firestore_client", fake_fc), \
+             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+            result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
+
+        self.assertEqual(result["judged_signal_count"], 1)
+        self.assertEqual(result["score_80plus_count"], 1)
+        self.assertEqual(len(fake_fc.upserted), 1)
+        self.assertEqual(fake_fc.upserted[0].importance_score, 82)
+        self.assertEqual(fake_fc.upserted[0].impact_type, "market")
+
+    def test_skips_already_judged(self):
+        signal = make_signal(
+            signal_id="s1",
+            cluster_status="confirmed",
+            topic_heat="high",
+            importance_score=70,
+        )
+        fake_fc = FakeFirestoreClient([signal])
+        fake_gemini = FakeGeminiClient({
+            "importance_score": 50,
+            "impact_type": "market",
+            "key_entities": [],
+            "regions": [],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        })
+        with patch.object(rss_importance_service, "firestore_client", fake_fc), \
+             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+            result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
+        self.assertEqual(result["judged_signal_count"], 0)
+        self.assertEqual(result["skipped_already_judged_count"], 1)
+        self.assertEqual(len(fake_gemini.calls), 0)
+
+    def test_skips_unverified(self):
+        signal = make_signal(
+            signal_id="s1",
+            cluster_status=None,
+            topic_heat=None,
+        )
+        fake_fc = FakeFirestoreClient([signal])
+        fake_gemini = FakeGeminiClient({
+            "importance_score": 50,
+            "impact_type": "market",
+            "key_entities": [],
+            "regions": [],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        })
+        with patch.object(rss_importance_service, "firestore_client", fake_fc), \
+             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+            result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
+        self.assertEqual(result["judged_signal_count"], 0)
+        self.assertEqual(result["skipped_unverified_count"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

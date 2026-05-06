@@ -7,6 +7,7 @@ import json
 
 RESEARCH_MODEL = "gemini-2.5-pro"
 EDITORIAL_MODEL = "gemini-2.5-pro"
+JUDGEMENT_MODEL = "gemini-2.5-pro"
 
 class GeminiClient:
     def __init__(self):
@@ -79,6 +80,30 @@ class GeminiClient:
             return response.text
         except Exception as e:
             logger.error(f"Error generating podcast script: {e}")
+            raise
+
+    def generate_json(self, prompt: str, model: str = JUDGEMENT_MODEL) -> tuple[dict, int, int]:
+        if not self.client:
+            raise Exception("Gemini API Client not initialized")
+        try:
+            response = self.client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                ),
+            )
+            text = response.text or ""
+            if not text:
+                raise ValueError("Gemini returned empty json response")
+            parsed = json.loads(text)
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
+            output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
+            return parsed, input_tokens, output_tokens
+        except Exception as e:
+            logger.error(f"Error in generate_json: {e}")
             raise
 
     def generate_tts(self, text: str) -> bytes:

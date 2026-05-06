@@ -42,6 +42,32 @@ class RssSignal(BaseModel):
     judge_output_tokens: Optional[int] = None
 
 
+class RssJudgementRun(BaseModel):
+    run_id: str
+    generated_at: str
+    since_hours: int
+
+    candidate_signal_count: int = 0
+    judged_signal_count: int = 0
+    skipped_already_judged_count: int = 0
+    skipped_unverified_count: int = 0
+    failed_signal_count: int = 0
+
+    avg_score: float = 0.0
+    score_80plus_count: int = 0
+    score_60_79_count: int = 0
+    score_40_59_count: int = 0
+    score_below_40_count: int = 0
+
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
+
+    duration_ms: int = 0
+    judge_model: str = ""
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
 class RssClusteringRun(BaseModel):
     run_id: str
     generated_at: str

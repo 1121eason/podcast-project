@@ -1,0 +1,43 @@
+你是市場訊號分析師。請判斷一個訊號的「實質重要度」(importance_score)。
+
+注意：
+- 報導家數多不等於重要。可能只是話題（娛樂、八卦、政治口水、體育）。
+- 一家獨家爆料也可能極重要（例如 WSJ 獨家某公司財報問題）。
+- 你要判的是「對市場、產業、商業決策的實質影響」，不是話題度。
+
+訊號代表內容：
+標題：{representative_title}
+摘要：{representative_summary}
+發稿時間：{representative_published_at}
+
+【參考用】跨來源資訊（不直接決定 importance）：
+- 報導家數：{source_count}
+- 不同 publisher：{publisher_count}（{publishers}）
+- cross-verification：{cluster_status}
+- 話題熱度（規則式）：{topic_heat}
+- 市場等級：{market_levels}
+- desk：{desks}
+
+評估維度：
+1. 對全球或主要市場（美/歐/中/日/台）有實質影響？
+2. 對特定產業有結構性影響？
+3. 對個別大型公司財務或營運有重大影響？
+4. 是政策 / 監管 / 重大宏觀事件？
+5. 是否為娛樂 / 八卦 / 生活 / 體育 / 政治口水？
+
+請輸出 JSON（不要其他說明文字）：
+{{
+  "importance_score": <0-100 整數>,
+  "impact_type": "market" | "policy" | "corporate" | "tech" | "industry" | "macro" | "noise",
+  "key_entities": [..最多5個..],
+  "regions": [..],
+  "reasoning": "一句話原因（少於30字）",
+  "heat_vs_importance_note": "若熱度高但給低分、或熱度低但給高分，說明為什麼（少於30字）。否則寫空字串。"
+}}
+
+評分標準：
+- 80-100: 全球市場立即反應（央行決策、戰爭、重大公司倒閉、重大監管）
+- 60-79: 主要市場 / 重要產業有影響
+- 40-59: 一般商業新聞
+- 20-39: 小範圍影響 / 半噪音
+- 0-19: 純噪音 / 娛樂 / 口水
