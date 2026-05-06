@@ -182,5 +182,104 @@ class TestJudgeFlow(unittest.TestCase):
         self.assertEqual(result["skipped_unverified_count"], 1)
 
 
+class TestGuardRails(unittest.TestCase):
+    def test_market_wrap_caps_score(self):
+        payload = {
+            "importance_score": 90,
+            "impact_type": "macro",
+            "key_entities": ["Iran"],
+            "regions": ["Global"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload, title="【歐股盤後】收漲", source_count=1, topic_heat="low"
+        )
+        self.assertEqual(out["importance_score"], 45)
+        self.assertIn("market_wrap", out["heat_vs_importance_note"])
+
+    def test_market_wrap_english_pattern(self):
+        payload = {
+            "importance_score": 80,
+            "impact_type": "market",
+            "key_entities": [],
+            "regions": [],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload, title="Stocks rise as market closes higher", source_count=1, topic_heat="low"
+        )
+        self.assertEqual(out["importance_score"], 45)
+
+    def test_single_corp_earnings_caps(self):
+        payload = {
+            "importance_score": 80,
+            "impact_type": "corporate",
+            "key_entities": ["Fortinet Inc."],
+            "regions": ["US"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="Fortinet Jumps on Outlook Hike",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 65)
+
+    def test_systemic_company_not_capped(self):
+        payload = {
+            "importance_score": 78,
+            "impact_type": "corporate",
+            "key_entities": ["Apple", "iPhone"],
+            "regions": ["Global"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="Apple beats earnings expectations",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 78)
+
+    def test_market_wrap_under_cap_unchanged(self):
+        payload = {
+            "importance_score": 30,
+            "impact_type": "market",
+            "key_entities": [],
+            "regions": [],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload, title="美股收漲", source_count=1, topic_heat="low"
+        )
+        self.assertEqual(out["importance_score"], 30)
+
+    def test_summary_truncation(self):
+        from app.models.signal import RssSignal
+
+        signal = RssSignal(
+            signal_id="s1",
+            generated_at="2026-05-07T00:00:00Z",
+            window_start="2026-05-06T20:00:00Z",
+            window_end="2026-05-07T00:00:00Z",
+            cluster_size=1,
+            source_count=1,
+            publisher_count=1,
+            publishers=["CNBC"],
+            representative_title="Test",
+            representative_summary="x" * 5000,
+            cluster_status="single_source",
+            topic_heat="low",
+        )
+        prompt = rss_importance_service._render_prompt(signal)
+        self.assertNotIn("x" * 400, prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

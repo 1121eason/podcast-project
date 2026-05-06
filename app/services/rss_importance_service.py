@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,6 +30,72 @@ PROMPT_TEMPLATE: Optional[str] = None
 COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
 COST_PER_1K_OUTPUT_TOKENS = 10.0 / 1000
 
+SUMMARY_CHAR_LIMIT = 300
+
+_MARKET_WRAP_PATTERNS = [
+    r"盤後",
+    r"盤前",
+    r"盤中",
+    r"收盤",
+    r"開盤",
+    r"收漲",
+    r"收跌",
+    r"收紅",
+    r"收黑",
+    r"盤勢",
+    r"期指",
+    r"大盤",
+    r"指數",
+    r"closing\s*bell",
+    r"market\s*close",
+    r"market\s*wrap",
+    r"closes\s+higher",
+    r"closes\s+lower",
+    r"futures\s+rise",
+    r"futures\s+fall",
+]
+MARKET_WRAP_REGEX = re.compile("|".join(_MARKET_WRAP_PATTERNS), re.IGNORECASE)
+MARKET_WRAP_CAP = 45
+
+_SINGLE_CORP_EARNINGS_PATTERNS = [
+    r"earnings",
+    r"財報",
+    r"季報",
+    r"營收",
+    r"\bbeat\b",
+    r"\bmiss\b",
+    r"\bguidance\b",
+    r"outlook",
+]
+SINGLE_CORP_REGEX = re.compile("|".join(_SINGLE_CORP_EARNINGS_PATTERNS), re.IGNORECASE)
+SINGLE_CORP_CAP = 65
+
+SYSTEMIC_ENTITIES = {
+    "Apple", "Microsoft", "NVIDIA", "Google", "Alphabet", "Amazon",
+    "Meta", "Tesla", "TSMC", "Berkshire", "JPMorgan", "ExxonMobil",
+    "ASML", "Samsung", "Saudi Aramco",
+}
+
+
+def _is_market_wrap(title: str) -> bool:
+    if not title:
+        return False
+    return bool(MARKET_WRAP_REGEX.search(title))
+
+
+def _is_single_corp_low_heat(signal_title: str, source_count: int, topic_heat: str, key_entities: list[str]) -> bool:
+    if source_count > 1:
+        return False
+    if topic_heat not in ("low", "medium"):
+        return False
+    if not SINGLE_CORP_REGEX.search(signal_title or ""):
+        return False
+    for entity in key_entities or []:
+        for systemic in SYSTEMIC_ENTITIES:
+            if systemic.lower() in entity.lower():
+                return False
+    return True
+
 
 def _load_prompt() -> str:
     global PROMPT_TEMPLATE
@@ -55,7 +122,7 @@ def _render_prompt(signal: RssSignal) -> str:
     template = _load_prompt()
     return template.format(
         representative_title=signal.representative_title or "(no title)",
-        representative_summary=(signal.representative_summary or "")[:1000],
+        representative_summary=(signal.representative_summary or "")[:SUMMARY_CHAR_LIMIT],
         representative_published_at=signal.representative_published_at or "(unknown)",
         source_count=signal.source_count,
         publisher_count=signal.publisher_count,
@@ -65,6 +132,38 @@ def _render_prompt(signal: RssSignal) -> str:
         market_levels=", ".join(signal.market_levels or []),
         desks=", ".join(signal.desks or []),
     )
+
+
+def _apply_guard_rails(
+    payload: dict,
+    title: str,
+    source_count: int,
+    topic_heat: str,
+) -> dict:
+    score = payload["importance_score"]
+    note_parts: list[str] = []
+
+    if _is_market_wrap(title) and score > MARKET_WRAP_CAP:
+        note_parts.append(f"[guard] market_wrap title cap {MARKET_WRAP_CAP}")
+        payload["importance_score"] = MARKET_WRAP_CAP
+        payload["impact_type"] = "market"
+
+    if _is_single_corp_low_heat(
+        title,
+        source_count,
+        topic_heat,
+        payload.get("key_entities") or [],
+    ) and payload["importance_score"] > SINGLE_CORP_CAP:
+        note_parts.append(f"[guard] single-source non-systemic earnings cap {SINGLE_CORP_CAP}")
+        payload["importance_score"] = SINGLE_CORP_CAP
+
+    if note_parts:
+        existing = (payload.get("heat_vs_importance_note") or "").strip()
+        guard_note = "; ".join(note_parts)
+        payload["heat_vs_importance_note"] = (
+            f"{guard_note} | {existing}" if existing else guard_note
+        )
+    return payload
 
 
 def _validate_payload(payload: dict) -> dict:
@@ -108,6 +207,12 @@ def _judge_one(signal: RssSignal) -> dict[str, object]:
         try:
             payload, input_tokens, output_tokens = gemini_client.generate_json(prompt)
             validated = _validate_payload(payload)
+            validated = _apply_guard_rails(
+                validated,
+                title=signal.representative_title or "",
+                source_count=signal.source_count,
+                topic_heat=signal.topic_heat or "",
+            )
             return {
                 "signal_id": signal.signal_id,
                 "ok": True,

@@ -57,7 +57,8 @@
       "Bash(.venv/bin/python3 -c \"from app.main import app; print\\('imports ok'\\); print\\([r.path for r in app.routes if r.path.startswith\\('/signals'\\)]\\)\")",
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 3: cross-verification + topic heat + LLM importance judgement\")",
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Fix route order: move /{signal_id} catch-all to end so /verify /judge match\")",
-      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Tune importance prompt: anchor on event-not-context, add company tier guidance\")"
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Tune importance prompt: anchor on event-not-context, add company tier guidance\")",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Add code-level guard rails: market wrap cap 45, non-systemic single-source earnings cap 65, summary 1000->300, prompt restructure\")"
     ]
   }
 }

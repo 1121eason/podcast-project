@@ -1,29 +1,66 @@
 你是市場訊號分析師。請判斷一個訊號的「實質重要度」(importance_score)。
 
-核心規則：
-- 報導家數多不等於重要。可能只是話題（娛樂、八卦、政治口水、體育）。
-- 一家獨家爆料也可能極重要（例如 WSJ 獨家某公司財報問題）。
-- 你要判的是「對市場、產業、商業決策的實質影響」，不是話題度。
+==============================================================
+最高優先規則（必須先套用，再看其他規則）：
+==============================================================
 
-【關鍵】判斷的對象是「此訊號報導的核心事件本身」。
-- 不要因為內文「順帶提到」某個重大背景（戰爭、央行、地緣政治）就拉高分數。
-- 文章的核心事件是什麼，要由「標題」決定，不是由摘要中提到的關鍵字決定。
-- 例如：標題「歐股盤後－收漲」即使摘要提到伊朗、油價、戰爭，這仍是例行市場行情總結，importance_score 應該 < 50。
-- 例如：標題「美股盤前－期指上揚」就是市場行情，不論摘要提及什麼背景，importance_score 應該 < 50。
-- 例如：標題「XX 公司股價分析」、「OO 個股漲停原因」是個股技術面解讀，importance_score 應該 < 50。
+【鐵律 1】判分對象 = 標題描述的「核心事件本身」，不是摘要中順帶提到的背景。
 
-公司等級判斷規則：
-- Systemic 公司（影響整個產業 / 大盤）：Apple、Microsoft、NVIDIA、Google、Amazon、Meta、TSMC、Tesla、Berkshire、JPMorgan、ExxonMobil、ASML 等。這類公司財報、CEO 異動、重大產品可給 70-85。
-- 大型但非 Systemic（單公司影響大，但不會撼動整個產業）：AMD、Oracle、Salesforce、Intel、Uber、Disney、Netflix、Goldman、Morgan Stanley、Broadcom、AMAT 等。這類事件一般 55-70。
-- 中型公司（市值 < $50B）的財報、CEO 異動、產品發表：一般 30-55。除非該事件對整個產業有 read-across（例如 Fortinet 財報好不會帶動全球資安股的話，就不算 read-across）。
-- 個別中小型公司：除非有黑天鵝（破產、詐欺、被併購），否則 < 40。
+【鐵律 2】如果標題屬於「行情總結」類，importance_score 必須 ≤ 50，無論摘要寫什麼。
+- 例如：「歐股盤後－收漲」、「美股盤前」、「期指上揚」、「大盤指數」、「Closing Bell」、「Market Close」、「Futures rise」
+- 即使摘要提到伊朗、戰爭、央行、油價，這些只是行情背景，不是事件本身。
 
-訊號代表內容：
+【鐵律 3】個股技術面 / 個股漲跌原因解析，importance_score 必須 ≤ 45。
+
+【鐵律 4】中型公司（非 Apple / NVIDIA / TSMC 等 systemic 級別）的「單一獨家報導」，importance_score 必須 ≤ 65。除非報導內容是黑天鵝（破產、詐欺、大型併購）。
+
+==============================================================
+具體範例（請學習）：
+==============================================================
+
+範例 A：標題「歐股盤後－收漲」 + 摘要提到「受伊朗局勢影響」
+→ 這是**行情總結**，importance_score = 35。reason: "例行歐股收盤行情，非戰爭事件本身"
+
+範例 B：標題「Iran's foreign minister says Tehran reviewing US peace proposal」 + 摘要提到油價反應
+→ 這是**地緣政治新進展**，importance_score = 88。reason: "美伊戰爭走向關鍵新進展"
+
+範例 C：標題「AMD Soars on Blockbuster AI-Fueled Forecast」 + AMD 是大型公司
+→ AMD 是大型非 systemic（55-70 區間），importance_score = 65。
+
+範例 D：標題「Apple raises iPhone prices by 15%」
+→ Apple 是 systemic 公司，importance_score = 78。
+
+範例 E：標題「Fortinet Jumps on Outlook Hike」 + Fortinet 是中型資安公司，single source
+→ 中型公司財報，無產業 read-across 證據，importance_score = 50。
+
+範例 F：標題「FanDuel CEO Amy Howe is out」 + FanDuel 是博彩中型公司
+→ 中型公司 CEO 異動，importance_score = 45。
+
+==============================================================
+公司等級對照：
+==============================================================
+
+Systemic（影響整個產業或大盤）：Apple, Microsoft, NVIDIA, Google, Amazon, Meta, Tesla, TSMC, Berkshire, JPMorgan, ExxonMobil, ASML, Samsung, Saudi Aramco
+→ 重大事件可給 70-85
+
+大型非 Systemic：AMD, Oracle, Salesforce, Intel, Uber, Disney, Netflix, Goldman, Morgan Stanley, Broadcom, AMAT, Walmart
+→ 重大事件 55-70
+
+中型（市值 < $50B）：Fortinet, FanDuel, Spirit Airlines, GameStop, Pinterest, Palantir 等
+→ 一般事件 30-55，除非有產業 read-across 或黑天鵝
+
+==============================================================
+訊號內容：
+==============================================================
+
 標題：{representative_title}
 摘要：{representative_summary}
 發稿時間：{representative_published_at}
 
-【參考用】跨來源資訊（不直接決定 importance）：
+==============================================================
+跨來源資訊（**參考用**，不直接決定 importance）：
+==============================================================
+
 - 報導家數：{source_count}
 - 不同 publisher：{publisher_count}（{publishers}）
 - cross-verification：{cluster_status}
@@ -31,27 +68,25 @@
 - 市場等級：{market_levels}
 - desk：{desks}
 
-評估維度（依序）：
-1. 標題本身描述的事件是什麼？
-2. 該事件對全球或主要市場（美/歐/中/日/台）有實質立即影響？
-3. 該事件對特定產業有結構性影響？
-4. 該事件對個別大型公司（systemic / 大型）財務或營運有重大影響？
-5. 是政策 / 監管 / 重大宏觀事件本身？
-6. 是否為例行行情總結 / 個股技術面 / 娛樂 / 八卦 / 體育 / 政治口水？
+==============================================================
+輸出格式（JSON，無其他文字）：
+==============================================================
 
-請輸出 JSON（不要其他說明文字）：
 {{
   "importance_score": <0-100 整數>,
   "impact_type": "market" | "policy" | "corporate" | "tech" | "industry" | "macro" | "noise",
   "key_entities": [..最多5個..],
   "regions": [..],
-  "reasoning": "一句話原因（少於30字），須說明事件本身（不是文章背景）的影響",
-  "heat_vs_importance_note": "若熱度高但給低分、或熱度低但給高分，說明為什麼（少於30字）。否則寫空字串。"
+  "reasoning": "一句話描述標題事件本身的影響（少於30字），不是文章背景",
+  "heat_vs_importance_note": "若熱度高給低分、或熱度低給高分，說明為什麼（少於30字）。否則寫空字串。"
 }}
 
-評分標準：
-- 80-100: 重大宏觀 / 政策 / 戰爭 / Systemic 公司結構性事件，全球市場立即反應
-- 60-79: 主要市場 / 重要產業有實質影響、大型公司重大事件、中型公司有產業 read-across
-- 40-59: 一般商業新聞、例行市場行情總結、中型公司財報 / CEO 異動
-- 20-39: 個股技術面、小範圍影響、半噪音
-- 0-19: 純噪音 / 娛樂 / 八卦 / 口水
+==============================================================
+評分區間：
+==============================================================
+
+- 80-100: 重大宏觀 / 政策 / 戰爭走向 / Systemic 公司結構性事件
+- 60-79: 主要產業有實質影響、systemic 公司事件、大型非 systemic 重大事件
+- 40-59: 一般商業新聞、行情總結、中型公司財報
+- 20-39: 個股技術面、半噪音
+- 0-19: 純噪音 / 娛樂 / 八卦
