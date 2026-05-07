@@ -76,6 +76,52 @@ SYSTEMIC_ENTITIES = {
     "ASML", "Samsung", "Saudi Aramco",
 }
 
+_PUBLIC_HEALTH_PATTERNS = [
+    r"hantavirus",
+    r"漢他病毒",
+    r"\bvirus\b",
+    r"病毒",
+    r"\boutbreak\b",
+    r"疫情",
+    r"\bepidemic\b",
+    r"\bpandemic\b",
+    r"\binfection\b",
+    r"感染",
+    r"傳染",
+    r"\bH1N1\b",
+    r"\bH5N1\b",
+    r"\bcovid\b",
+    r"新冠",
+    r"\bdisease\b",
+]
+PUBLIC_HEALTH_REGEX = re.compile("|".join(_PUBLIC_HEALTH_PATTERNS), re.IGNORECASE)
+PUBLIC_HEALTH_CAP = 65
+
+_ANALYSIS_FEATURE_PATTERNS = [
+    r"^為何",
+    r"為何.{1,15}加碼",
+    r"為何.{1,15}下跌",
+    r"為何.{1,15}飆漲",
+    r"^解析",
+    r"^深度",
+    r"^獨家分析",
+    r"^Why\s+is",
+    r"^Why\s+does",
+    r"^Why\s+the",
+    r"Here'?s\s+how",
+    r"Here'?s\s+why",
+    r"^What\s+to\s+expect",
+    r"^Inside",
+    r"^Explainer",
+    r"專欄",
+    r"觀察",
+    r"分析師.{0,5}解讀",
+    r"投資人.{0,5}解讀",
+    r"從.{1,10}看.{1,10}",
+]
+ANALYSIS_REGEX = re.compile("|".join(_ANALYSIS_FEATURE_PATTERNS), re.IGNORECASE)
+ANALYSIS_CAP = 60
+
 
 def _is_market_wrap(title: str) -> bool:
     if not title:
@@ -95,6 +141,28 @@ def _is_single_corp_low_heat(signal_title: str, source_count: int, topic_heat: s
             if systemic.lower() in entity.lower():
                 return False
     return True
+
+
+def _has_market_entity(key_entities: list[str]) -> bool:
+    market_keywords = ["nvidia", "apple", "tsmc", "amazon", "microsoft", "google",
+                       "amd", "tesla", "stock", "market", "earnings", "fed", "ecb",
+                       "央行", "股", "etf", "fund", "bond", "treasury", "oil",
+                       "原油", "黃金", "gold", "btc", "bitcoin", "美元", "日圓",
+                       "exchange", "interest rate", "inflation", "通膨", "cpi", "pmi"]
+    blob = " ".join(key_entities or []).lower()
+    return any(k in blob for k in market_keywords)
+
+
+def _is_public_health_no_market(title: str, summary: str, key_entities: list[str]) -> bool:
+    if not PUBLIC_HEALTH_REGEX.search(title or "") and not PUBLIC_HEALTH_REGEX.search(summary or ""):
+        return False
+    return not _has_market_entity(key_entities)
+
+
+def _is_single_source_analysis(title: str, source_count: int) -> bool:
+    if source_count > 1:
+        return False
+    return bool(ANALYSIS_REGEX.search(title or ""))
 
 
 def _load_prompt() -> str:
@@ -137,6 +205,7 @@ def _render_prompt(signal: RssSignal) -> str:
 def _apply_guard_rails(
     payload: dict,
     title: str,
+    summary: str,
     source_count: int,
     topic_heat: str,
 ) -> dict:
@@ -156,6 +225,18 @@ def _apply_guard_rails(
     ) and payload["importance_score"] > SINGLE_CORP_CAP:
         note_parts.append(f"[guard] single-source non-systemic earnings cap {SINGLE_CORP_CAP}")
         payload["importance_score"] = SINGLE_CORP_CAP
+
+    if _is_public_health_no_market(
+        title,
+        summary,
+        payload.get("key_entities") or [],
+    ) and payload["importance_score"] > PUBLIC_HEALTH_CAP:
+        note_parts.append(f"[guard] public-health non-market cap {PUBLIC_HEALTH_CAP}")
+        payload["importance_score"] = PUBLIC_HEALTH_CAP
+
+    if _is_single_source_analysis(title, source_count) and payload["importance_score"] > ANALYSIS_CAP:
+        note_parts.append(f"[guard] analysis/feature single-source cap {ANALYSIS_CAP}")
+        payload["importance_score"] = ANALYSIS_CAP
 
     if note_parts:
         existing = (payload.get("heat_vs_importance_note") or "").strip()
@@ -210,6 +291,7 @@ def _judge_one(signal: RssSignal) -> dict[str, object]:
             validated = _apply_guard_rails(
                 validated,
                 title=signal.representative_title or "",
+                summary=signal.representative_summary or "",
                 source_count=signal.source_count,
                 topic_heat=signal.topic_heat or "",
             )

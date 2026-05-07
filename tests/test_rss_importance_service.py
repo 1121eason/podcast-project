@@ -193,7 +193,7 @@ class TestGuardRails(unittest.TestCase):
             "heat_vs_importance_note": "",
         }
         out = rss_importance_service._apply_guard_rails(
-            payload, title="【歐股盤後】收漲", source_count=1, topic_heat="low"
+            payload, title="【歐股盤後】收漲", summary="", source_count=1, topic_heat="low"
         )
         self.assertEqual(out["importance_score"], 45)
         self.assertIn("market_wrap", out["heat_vs_importance_note"])
@@ -208,7 +208,7 @@ class TestGuardRails(unittest.TestCase):
             "heat_vs_importance_note": "",
         }
         out = rss_importance_service._apply_guard_rails(
-            payload, title="Stocks rise as market closes higher", source_count=1, topic_heat="low"
+            payload, title="Stocks rise as market closes higher", summary="", source_count=1, topic_heat="low"
         )
         self.assertEqual(out["importance_score"], 45)
 
@@ -224,6 +224,7 @@ class TestGuardRails(unittest.TestCase):
         out = rss_importance_service._apply_guard_rails(
             payload,
             title="Fortinet Jumps on Outlook Hike",
+            summary="",
             source_count=1,
             topic_heat="low",
         )
@@ -241,6 +242,7 @@ class TestGuardRails(unittest.TestCase):
         out = rss_importance_service._apply_guard_rails(
             payload,
             title="Apple beats earnings expectations",
+            summary="",
             source_count=1,
             topic_heat="low",
         )
@@ -256,9 +258,83 @@ class TestGuardRails(unittest.TestCase):
             "heat_vs_importance_note": "",
         }
         out = rss_importance_service._apply_guard_rails(
-            payload, title="美股收漲", source_count=1, topic_heat="low"
+            payload, title="美股收漲", summary="", source_count=1, topic_heat="low"
         )
         self.assertEqual(out["importance_score"], 30)
+
+    def test_public_health_no_market_caps(self):
+        payload = {
+            "importance_score": 92,
+            "impact_type": "macro",
+            "key_entities": ["cruise ship", "Hantavirus"],
+            "regions": ["US"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="クルーズ船感染ハンタウイルス",
+            summary="cruise ship outbreak",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 65)
+        self.assertIn("public-health", out["heat_vs_importance_note"])
+
+    def test_public_health_with_market_entity_not_capped(self):
+        payload = {
+            "importance_score": 80,
+            "impact_type": "macro",
+            "key_entities": ["Pfizer", "stock", "vaccine"],
+            "regions": ["US"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="New disease outbreak boosts Pfizer stock",
+            summary="",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 80)
+
+    def test_analysis_feature_caps(self):
+        payload = {
+            "importance_score": 82,
+            "impact_type": "corporate",
+            "key_entities": ["Apple", "Cook", "AI"],
+            "regions": ["Global"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="為何庫克在交棒前突然加碼AI？",
+            summary="",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 60)
+        self.assertIn("analysis", out["heat_vs_importance_note"])
+
+    def test_analysis_multi_source_not_capped(self):
+        payload = {
+            "importance_score": 75,
+            "impact_type": "corporate",
+            "key_entities": ["Apple"],
+            "regions": ["Global"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="Why Apple is doubling down on AI",
+            summary="",
+            source_count=3,
+            topic_heat="medium",
+        )
+        self.assertEqual(out["importance_score"], 75)
 
     def test_summary_truncation(self):
         from app.models.signal import RssSignal

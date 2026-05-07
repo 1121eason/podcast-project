@@ -58,7 +58,11 @@
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 3: cross-verification + topic heat + LLM importance judgement\")",
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Fix route order: move /{signal_id} catch-all to end so /verify /judge match\")",
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Tune importance prompt: anchor on event-not-context, add company tier guidance\")",
-      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Add code-level guard rails: market wrap cap 45, non-systemic single-source earnings cap 65, summary 1000->300, prompt restructure\")"
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Add code-level guard rails: market wrap cap 45, non-systemic single-source earnings cap 65, summary 1000->300, prompt restructure\")",
+      "Bash(curl -sk -X POST https://informative-ai.zeabur.app/signals/judge -H 'Content-Type: application/json' -H 'X-Admin-Token: qwertyuiopasdfghjklzxcvbnm' -d '{\"since_hours\": 24, \"max_workers\": 5, \"max_signals_per_run\": 2000}' -o /tmp/judge24.json -w 'http=%{http_code}\\\\n')",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Expand info collection plan into tiered Phase 6-9 roadmap, log Phase 3 prompt iterations\")",
+      "Bash(curl -sk \"https://informative-ai.zeabur.app/signals/top?since_hours=24&min_score=70&limit=30\" -o /tmp/top.json)",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Add health-no-market and analysis-feature guards \\(cap 65 / 60\\)\")"
     ]
   }
 }
