@@ -9,7 +9,7 @@ from typing import Optional
 
 from app.clients.firestore_client import firestore_client
 from app.clients.gemini_client import JUDGEMENT_MODEL, gemini_client
-from app.models.signal import BriefingSection, RssBriefing, RssSignal
+from app.models.signal import BriefingCategory, BriefingSection, RssBriefing, RssSignal
 from app.services.rss_source_service import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -19,9 +19,17 @@ PROMPT_TEMPLATE: Optional[str] = None
 COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
 COST_PER_1K_OUTPUT_TOKENS = 10.0 / 1000
 
-DEFAULT_SCORE_THRESHOLD = 70
-DEFAULT_MAX_SIGNALS_INPUT = 60
-DEFAULT_MAX_SECTIONS = 8
+DEFAULT_SCORE_THRESHOLD = 60
+DEFAULT_MAX_SIGNALS_INPUT = 80
+DEFAULT_MAX_SECTIONS = 4
+
+CATEGORY_TITLES = {
+    "geopolitics": "國際局勢",
+    "global_finance": "國際金融",
+    "tech": "科技發展",
+    "business_trends": "其他商業趨勢",
+}
+CATEGORY_ORDER = ["geopolitics", "global_finance", "tech", "business_trends"]
 
 
 def _load_prompt() -> str:
@@ -82,41 +90,73 @@ def _render_prompt(signals: list[RssSignal], total_judged: int) -> str:
     )
 
 
-def _validate_briefing_payload(payload: dict, candidate_signals: list[RssSignal], max_sections: int) -> dict:
+def _validate_section(raw: dict, candidate_signals: list[RssSignal], section_id: str) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    summary = str(raw.get("summary") or "").strip()
+    if not title or not summary:
+        return None
+    valid_signal_ids = {s.signal_id for s in candidate_signals}
+    ref_ids = [str(x) for x in (raw.get("referenced_signal_ids") or []) if str(x) in valid_signal_ids]
+    ref_urls = [str(x) for x in (raw.get("referenced_urls") or [])][:10]
+    if not ref_urls and ref_ids:
+        ref_urls = []
+        for s in candidate_signals:
+            if s.signal_id in ref_ids and s.representative_url:
+                ref_urls.append(s.representative_url)
+    return {
+        "section_id": section_id,
+        "title": title[:80],
+        "summary": summary[:1500],
+        "importance_score": int(raw.get("importance_score") or 0),
+        "impact_type": str(raw.get("impact_type") or ""),
+        "impacted_sectors": [str(x) for x in (raw.get("impacted_sectors") or [])][:5],
+        "watch_points": [str(x) for x in (raw.get("watch_points") or [])][:5],
+        "referenced_signal_ids": ref_ids[:10],
+        "referenced_urls": ref_urls[:10],
+    }
+
+
+def _validate_briefing_payload(payload: dict, candidate_signals: list[RssSignal], max_sections_per_category: int) -> dict:
     overview = str(payload.get("overview") or "").strip()
     if not overview:
         raise ValueError("missing overview")
 
-    raw_sections = payload.get("sections") or []
-    if not isinstance(raw_sections, list) or not raw_sections:
-        raise ValueError("missing sections")
+    raw_categories = payload.get("categories") or []
+    if not isinstance(raw_categories, list) or not raw_categories:
+        raise ValueError("missing categories")
 
-    valid_signal_ids = {s.signal_id for s in candidate_signals}
-    sections: list[dict] = []
-    for idx, raw in enumerate(raw_sections[:max_sections]):
+    by_id = {}
+    for raw in raw_categories:
         if not isinstance(raw, dict):
             continue
-        title = str(raw.get("title") or "").strip()
-        summary = str(raw.get("summary") or "").strip()
-        if not title or not summary:
-            continue
-        ref_ids = [str(x) for x in (raw.get("referenced_signal_ids") or []) if str(x) in valid_signal_ids]
-        ref_urls = [str(x) for x in (raw.get("referenced_urls") or [])][:10]
-        if not ref_urls and ref_ids:
-            ref_urls = []
-            for s in candidate_signals:
-                if s.signal_id in ref_ids and s.representative_url:
-                    ref_urls.append(s.representative_url)
-        sections.append({
-            "section_id": f"sec_{idx+1:02d}",
-            "title": title[:60],
-            "summary": summary[:1200],
-            "importance_score": int(raw.get("importance_score") or 0),
-            "impact_type": str(raw.get("impact_type") or ""),
-            "impacted_sectors": [str(x) for x in (raw.get("impacted_sectors") or [])][:5],
-            "watch_points": [str(x) for x in (raw.get("watch_points") or [])][:5],
-            "referenced_signal_ids": ref_ids[:10],
-            "referenced_urls": ref_urls[:10],
+        cid = str(raw.get("category_id") or "").strip()
+        if cid in CATEGORY_TITLES:
+            by_id[cid] = raw
+
+    categories: list[dict] = []
+    flat_sections: list[dict] = []
+    sec_counter = 0
+    for cid in CATEGORY_ORDER:
+        raw = by_id.get(cid, {})
+        title = str(raw.get("title") or CATEGORY_TITLES[cid])
+        cat_overview = str(raw.get("category_overview") or "").strip()[:300]
+        raw_sections = raw.get("sections") or []
+        if not isinstance(raw_sections, list):
+            raw_sections = []
+        validated_sections = []
+        for raw_sec in raw_sections[:max_sections_per_category]:
+            sec_counter += 1
+            validated = _validate_section(raw_sec, candidate_signals, f"sec_{sec_counter:02d}")
+            if validated:
+                validated_sections.append(validated)
+                flat_sections.append(validated)
+        categories.append({
+            "category_id": cid,
+            "title": title,
+            "category_overview": cat_overview or "今日無達門檻訊號。",
+            "sections": validated_sections,
         })
 
     pool_health = payload.get("signal_pool_health") or {}
@@ -124,8 +164,9 @@ def _validate_briefing_payload(payload: dict, candidate_signals: list[RssSignal]
         pool_health = {}
 
     return {
-        "overview": overview[:1000],
-        "sections": sections,
+        "overview": overview[:1500],
+        "categories": categories,
+        "sections": flat_sections,
         "signal_pool_health": pool_health,
     }
 
@@ -137,6 +178,9 @@ def generate_daily_briefing(
     max_signals_input: int = DEFAULT_MAX_SIGNALS_INPUT,
     write_google_doc: bool = True,
 ) -> dict[str, object]:
+    """
+    max_sections is interpreted as "max sections per category".
+    """
     started = time.monotonic()
     briefing_date = _today_date_str(briefing_date)
     briefing_id = _generate_briefing_id(briefing_date)
@@ -176,6 +220,15 @@ def generate_daily_briefing(
     validated = _validate_briefing_payload(payload, candidates, max_sections)
 
     sections = [BriefingSection(**s) for s in validated["sections"]]
+    categories = [
+        BriefingCategory(
+            category_id=c["category_id"],
+            title=c["title"],
+            category_overview=c["category_overview"],
+            sections=[BriefingSection(**s) for s in c["sections"]],
+        )
+        for c in validated["categories"]
+    ]
 
     cost_usd = (
         input_tokens / 1000 * COST_PER_1K_INPUT_TOKENS
@@ -190,7 +243,7 @@ def generate_daily_briefing(
             google_doc_id, google_doc_url = write_briefing_to_doc(
                 briefing_date=briefing_date,
                 overview=validated["overview"],
-                sections=sections,
+                categories=categories,
                 signal_pool_health=validated["signal_pool_health"],
             )
         except Exception as exc:
@@ -204,6 +257,7 @@ def generate_daily_briefing(
         selected_signal_count=len(candidates),
         total_input_signals=total_judged,
         overview=validated["overview"],
+        categories=categories,
         sections=sections,
         signal_pool_health=validated["signal_pool_health"],
         google_doc_id=google_doc_id,

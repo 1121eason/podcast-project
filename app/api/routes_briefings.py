@@ -21,9 +21,9 @@ class BusinessImpactRequest(BaseModel):
 
 class BriefingRequest(BaseModel):
     briefing_date: Optional[str] = None
-    score_threshold: int = Field(default=70, ge=0, le=100)
-    max_sections: int = Field(default=8, ge=3, le=15)
-    max_signals_input: int = Field(default=60, ge=5, le=200)
+    score_threshold: int = Field(default=60, ge=0, le=100)
+    max_sections: int = Field(default=4, ge=1, le=10)
+    max_signals_input: int = Field(default=80, ge=5, le=200)
     write_google_doc: bool = True
 
 

@@ -67,7 +67,8 @@
       "Bash(curl -sk \"https://informative-ai.zeabur.app/signals/top?since_hours=24&min_score=0&limit=200\" -o /tmp/b.json)",
       "Bash(pstree -p 36735)",
       "Bash(.venv/bin/python3 -c \"from app.main import app; print\\('imports ok'\\); routes = [r.path for r in app.routes if 'briefings' in r.path or 'business-impact' in r.path]; print\\(routes\\)\")",
-      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 4: business impact + editorial briefing + Google Doc writer\")"
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 4: business impact + editorial briefing + Google Doc writer\")",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Phase 4: switch briefing to 4-category structure \\(geopolitics/finance/tech/business\\), threshold 70->60\")"
     ]
   }
 }

@@ -91,6 +91,13 @@ class BriefingSection(BaseModel):
     referenced_urls: list[str] = Field(default_factory=list)
 
 
+class BriefingCategory(BaseModel):
+    category_id: str
+    title: str
+    category_overview: str = ""
+    sections: list[BriefingSection] = Field(default_factory=list)
+
+
 class RssBriefing(BaseModel):
     briefing_id: str
     briefing_date: str
@@ -101,6 +108,7 @@ class RssBriefing(BaseModel):
     total_input_signals: int = 0
 
     overview: str = ""
+    categories: list[BriefingCategory] = Field(default_factory=list)
     sections: list[BriefingSection] = Field(default_factory=list)
     signal_pool_health: dict = Field(default_factory=dict)
 

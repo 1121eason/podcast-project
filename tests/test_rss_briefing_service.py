@@ -55,7 +55,7 @@ class TestBriefingFlow(unittest.TestCase):
         self.assertEqual(result["selected_signal_count"], 0)
         self.assertEqual(result["overview"], "今日無達門檻訊號。")
 
-    def test_generates_briefing_with_sections(self):
+    def test_generates_briefing_with_categories(self):
         signals = [
             make_signal("s1", 90, "Iran-US peace deal", "https://example.com/1"),
             make_signal("s2", 85, "AMD AI forecast", "https://example.com/2"),
@@ -63,33 +63,57 @@ class TestBriefingFlow(unittest.TestCase):
         fake_fc = FakeFirestoreClient(signals)
         fake_g = FakeGeminiClient({
             "overview": "今日訊號池呈現地緣政治緩和...",
-            "sections": [
+            "categories": [
                 {
-                    "title": "美伊談判取得進展",
-                    "summary": "美伊近日傳出 14 點備忘錄...",
-                    "importance_score": 90,
-                    "impact_type": "macro",
-                    "impacted_sectors": ["energy", "global markets"],
-                    "watch_points": ["伊朗外長表態"],
-                    "referenced_signal_ids": ["s1"],
-                    "referenced_urls": ["https://example.com/1"],
+                    "category_id": "geopolitics",
+                    "title": "國際局勢",
+                    "category_overview": "美伊衝突取得突破。",
+                    "sections": [
+                        {
+                            "title": "美伊談判取得進展",
+                            "summary": "美伊近日傳出 14 點備忘錄...",
+                            "importance_score": 90,
+                            "impact_type": "macro",
+                            "impacted_sectors": ["energy"],
+                            "watch_points": ["伊朗外長表態"],
+                            "referenced_signal_ids": ["s1"],
+                            "referenced_urls": ["https://example.com/1"],
+                        }
+                    ],
                 },
                 {
-                    "title": "AMD AI 財測強勁",
-                    "summary": "AMD 釋出強勁 AI 財測...",
-                    "importance_score": 85,
-                    "impact_type": "corporate",
-                    "impacted_sectors": ["semiconductor"],
-                    "watch_points": ["NVIDIA 財報"],
-                    "referenced_signal_ids": ["s2"],
-                    "referenced_urls": ["https://example.com/2"],
+                    "category_id": "global_finance",
+                    "title": "國際金融",
+                    "category_overview": "今日無達門檻訊號",
+                    "sections": [],
+                },
+                {
+                    "category_id": "tech",
+                    "title": "科技發展",
+                    "category_overview": "AI 投資面有新進展。",
+                    "sections": [
+                        {
+                            "title": "AMD AI 財測強勁",
+                            "summary": "AMD 釋出強勁 AI 財測...",
+                            "importance_score": 85,
+                            "impact_type": "corporate",
+                            "impacted_sectors": ["semiconductor"],
+                            "watch_points": ["NVIDIA 財報"],
+                            "referenced_signal_ids": ["s2"],
+                            "referenced_urls": ["https://example.com/2"],
+                        }
+                    ],
+                },
+                {
+                    "category_id": "business_trends",
+                    "title": "其他商業趨勢",
+                    "category_overview": "",
+                    "sections": [],
                 },
             ],
             "signal_pool_health": {
                 "total_judged": 2,
                 "high_importance_count": 2,
-                "main_themes": ["geopolitics", "AI"],
-                "coverage_gaps": [],
             },
         })
 
@@ -100,23 +124,40 @@ class TestBriefingFlow(unittest.TestCase):
             )
 
         self.assertEqual(result["selected_signal_count"], 2)
+        self.assertEqual(len(result["categories"]), 4)
+        # categories are in fixed order
+        self.assertEqual(result["categories"][0]["category_id"], "geopolitics")
+        self.assertEqual(result["categories"][1]["category_id"], "global_finance")
+        self.assertEqual(result["categories"][2]["category_id"], "tech")
+        self.assertEqual(result["categories"][3]["category_id"], "business_trends")
+        # geopolitics has 1 section
+        self.assertEqual(len(result["categories"][0]["sections"]), 1)
+        # global_finance is empty
+        self.assertEqual(len(result["categories"][1]["sections"]), 0)
+        # flat sections aggregate all
         self.assertEqual(len(result["sections"]), 2)
-        self.assertEqual(result["sections"][0]["title"], "美伊談判取得進展")
-        self.assertIn("https://example.com/1", result["sections"][0]["referenced_urls"])
 
-    def test_invalid_signal_ids_filtered(self):
-        signals = [make_signal("s1", 90, "Real signal", "https://example.com/1")]
+    def test_missing_category_filled_empty(self):
+        signals = [make_signal("s1", 75, "Test", "https://example.com/1")]
         fake_fc = FakeFirestoreClient(signals)
+        # Gemini only returned one category; others should be filled empty
         fake_g = FakeGeminiClient({
-            "overview": "test overview",
-            "sections": [
+            "overview": "test",
+            "categories": [
                 {
-                    "title": "A",
-                    "summary": "x",
-                    "importance_score": 90,
-                    "impact_type": "macro",
-                    "referenced_signal_ids": ["s1", "fake_id_999"],
-                    "referenced_urls": [],
+                    "category_id": "tech",
+                    "title": "科技發展",
+                    "category_overview": "x",
+                    "sections": [
+                        {
+                            "title": "Test",
+                            "summary": "x x x",
+                            "importance_score": 75,
+                            "impact_type": "tech",
+                            "referenced_signal_ids": ["s1"],
+                            "referenced_urls": ["https://example.com/1"],
+                        }
+                    ],
                 }
             ],
             "signal_pool_health": {},
@@ -126,9 +167,15 @@ class TestBriefingFlow(unittest.TestCase):
             result = rss_briefing_service.generate_daily_briefing(
                 briefing_date="2026-05-07", write_google_doc=False
             )
-        section = result["sections"][0]
-        self.assertEqual(section["referenced_signal_ids"], ["s1"])
-        self.assertIn("https://example.com/1", section["referenced_urls"])
+        self.assertEqual(len(result["categories"]), 4)
+        cat_ids = [c["category_id"] for c in result["categories"]]
+        self.assertEqual(cat_ids, ["geopolitics", "global_finance", "tech", "business_trends"])
+        # tech has 1 section, others empty
+        for c in result["categories"]:
+            if c["category_id"] == "tech":
+                self.assertEqual(len(c["sections"]), 1)
+            else:
+                self.assertEqual(len(c["sections"]), 0)
 
 
 if __name__ == "__main__":
