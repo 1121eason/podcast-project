@@ -15,12 +15,21 @@
 - 引用來源 URL（用 referenced_signal_ids 對應）。
 - 如果某大類今日沒有達門檻訊號，**仍要保留該大類**，category_overview 寫「今日無達門檻訊號」、sections 為空。
 - 同一個訊號**不要在多個大類重複出現**。每個訊號只能歸到最合適的一個大類。
-- 同一個大類內可有 1-4 個 sections（依當日訊號量決定）。
-- 訊號歸類判斷：
-  - 戰爭、外交、地緣 → 國際局勢
-  - 央行、匯率、利率、CPI、油價（單純市場反應） → 國際金融
-  - AI、晶片、雲端、研發 → 科技發展
-  - 其他大型公司動向、產業結構變化 → 其他商業趨勢
+- 同一個大類內 sections 數不限（依當日訊號量決定，沒訊號就 0 段、訊號多就多寫幾段）。
+- 訊號歸類判斷（按「事件本身的核心」決定，不是按公司名稱決定）：
+  - 戰爭、外交、地緣、制裁、領袖會晤、邊境衝突 → 國際局勢
+  - 央行決策、匯率干預、利率、CPI / PMI / 就業數據、油價市場反應、債市、原物料宏觀 → 國際金融
+  - 科技發展 = 「公司核心業務本身就是 AI / 半導體 / 雲端基礎設施」的事件：
+    - NVIDIA、AMD、Intel、TSMC、ASML、SK Hynix、Samsung Foundry、SpaceX 自建晶片廠
+    - OpenAI、Anthropic、DeepMind、Cohere、Mistral、xAI（純 AI 模型公司）
+    - 雲端基礎設施事件（Azure 算力、AWS 容量、Google Cloud TPU）
+  - 其他商業趨勢 = 「大型一般公司順帶做 AI / 用 AI / 一般商業動向」：
+    - Apple（消費電子，AI 是配菜，即使是 iOS AI 也歸這裡）
+    - Tesla（車廠，自駕 AI 也歸這裡，除非是 Tesla AI 晶片本身的進展）
+    - Amazon（零售 / 物流）、Disney、Walmart、Berkshire
+    - Microsoft Office Copilot 漲價、Google 廣告財報（vs Microsoft Azure / Google DeepMind 模型 → 科技發展）
+    - 零售、消費、運輸、媒體娛樂、金融機構（除非是央行 / 匯率類）
+- 判斷依據鐵律：「公司是不是 AI 大廠」不重要，重要的是「**這個事件本身的核心是不是 AI / 半導體 / 雲端 infrastructure**」。Apple iOS 開放第三方 AI 模型是消費電子產品策略，不是 AI 技術突破，歸 business_trends。
 
 訊號清單（已按重要度分數排序）：
 {signals_json}
