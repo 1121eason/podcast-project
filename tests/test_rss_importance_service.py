@@ -281,6 +281,26 @@ class TestGuardRails(unittest.TestCase):
         self.assertEqual(out["importance_score"], 65)
         self.assertIn("public-health", out["heat_vs_importance_note"])
 
+    def test_public_health_summary_only_does_not_trigger(self):
+        # Title doesn't mention health; only summary does (e.g. metaphorical 感染力).
+        # Guard should NOT fire.
+        payload = {
+            "importance_score": 80,
+            "impact_type": "industry",
+            "key_entities": ["China", "Wind Power Industry"],
+            "regions": ["CN"],
+            "reasoning": "x",
+            "heat_vs_importance_note": "",
+        }
+        out = rss_importance_service._apply_guard_rails(
+            payload,
+            title="中国对风电的大力投资正在获得回报",
+            summary="這份政策具有感染力，影響整個產業鏈",
+            source_count=1,
+            topic_heat="low",
+        )
+        self.assertEqual(out["importance_score"], 80)
+
     def test_public_health_with_market_entity_not_capped(self):
         payload = {
             "importance_score": 80,

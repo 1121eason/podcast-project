@@ -154,7 +154,8 @@ def _has_market_entity(key_entities: list[str]) -> bool:
 
 
 def _is_public_health_no_market(title: str, summary: str, key_entities: list[str]) -> bool:
-    if not PUBLIC_HEALTH_REGEX.search(title or "") and not PUBLIC_HEALTH_REGEX.search(summary or ""):
+    # Title must match; summary alone is too noisy (caught wind power / metaphorical 感染 cases).
+    if not PUBLIC_HEALTH_REGEX.search(title or ""):
         return False
     return not _has_market_entity(key_entities)
 
