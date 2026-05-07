@@ -77,7 +77,9 @@
       "Bash(.venv/bin/python3 -c \"import openai; print\\('openai installed:', openai.__version__\\)\")",
       "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Cleanup old code \\(22 files\\); switch judge to OpenAI gpt-5-mini, keep Gemini as fallback\")",
       "Bash(.venv/bin/python3 -m unittest tests.test_rss_briefing_service)",
-      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Wire OpenAI for W6 \\(mini high\\) and W7 \\(gpt-5 full\\) with provider switching + reasoning_effort\")"
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Wire OpenAI for W6 \\(mini high\\) and W7 \\(gpt-5 full\\) with provider switching + reasoning_effort\")",
+      "Bash(.venv/bin/python3 -c \"from app.main import app; print\\('imports ok'\\); print\\('routes:', len\\(app.routes\\)\\)\")",
+      "Bash(git -c user.email=\"liethan.1121@gmail.com\" -c user.name=\"Eason\" commit -m \"Skip temperature param for GPT-5 / o-series models \\(only default supported\\)\")"
     ]
   }
 }

@@ -7,6 +7,12 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _model_locks_temperature(model: str) -> bool:
+    """GPT-5 series and reasoning models only support default temperature (1)."""
+    name = (model or "").lower()
+    return name.startswith("gpt-5") or name.startswith("o1") or name.startswith("o3") or name.startswith("o4")
+
+
 class OpenAIClient:
     def __init__(self):
         self.client = None
@@ -31,7 +37,7 @@ class OpenAIClient:
         self,
         prompt: str,
         model: str,
-        temperature: float = 0.2,
+        temperature: Optional[float] = 0.2,
         reasoning_effort: Optional[str] = None,
     ) -> tuple[dict, int, int]:
         if not self.is_ready:
@@ -41,8 +47,10 @@ class OpenAIClient:
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"},
-            "temperature": temperature,
         }
+        # GPT-5 series only supports default temperature (=1). Skip the param for those.
+        if temperature is not None and not _model_locks_temperature(model):
+            kwargs["temperature"] = temperature
         if reasoning_effort and reasoning_effort.lower() in {"minimal", "low", "medium", "high"}:
             kwargs["reasoning_effort"] = reasoning_effort.lower()
 
@@ -64,7 +72,7 @@ class OpenAIClient:
         self,
         prompt: str,
         model: str,
-        temperature: float = 0.4,
+        temperature: Optional[float] = 0.4,
         reasoning_effort: Optional[str] = None,
     ) -> tuple[str, int, int]:
         if not self.is_ready:
@@ -73,8 +81,9 @@ class OpenAIClient:
         kwargs: dict = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
         }
+        if temperature is not None and not _model_locks_temperature(model):
+            kwargs["temperature"] = temperature
         if reasoning_effort and reasoning_effort.lower() in {"minimal", "low", "medium", "high"}:
             kwargs["reasoning_effort"] = reasoning_effort.lower()
 
