@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Optional
 
 from app.clients.firestore_client import firestore_client
-from app.clients.gemini_client import JUDGEMENT_MODEL, gemini_client
+from app.clients.gemini_client import gemini_client
+from app.clients.openai_client import openai_client
+from app.core.config import settings
 from app.models.signal import (
     BriefingCategory,
     BriefingSection,
@@ -22,8 +24,26 @@ logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "editorial_briefing_v2.txt"
 PROMPT_TEMPLATE: Optional[str] = None
-COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
-COST_PER_1K_OUTPUT_TOKENS = 10.0 / 1000
+PROVIDER_PRICING = {
+    "gemini": {"input": 1.25 / 1000, "output": 10.0 / 1000},   # gemini-2.5-pro
+    "openai": {"input": 1.25 / 1000, "output": 10.0 / 1000},   # gpt-5 full (same price as Gemini Pro)
+}
+
+
+def _call_briefing_model(prompt: str) -> tuple[dict, int, int, str]:
+    """Returns (payload, input_tokens, output_tokens, model_used)."""
+    provider = (settings.BRIEFING_PROVIDER or "openai").lower()
+    if provider == "openai" and openai_client.is_ready:
+        model = settings.BRIEFING_MODEL_OPENAI
+        payload, in_tok, out_tok = openai_client.generate_json(
+            prompt,
+            model=model,
+            reasoning_effort=settings.BRIEFING_REASONING_EFFORT,
+        )
+        return payload, in_tok, out_tok, model
+    model = settings.BRIEFING_MODEL_GEMINI
+    payload, in_tok, out_tok = gemini_client.generate_json(prompt, model=model)
+    return payload, in_tok, out_tok, model
 
 DEFAULT_SCORE_THRESHOLD = 60
 DEFAULT_MAX_SIGNALS_INPUT = 80
@@ -288,7 +308,11 @@ def generate_daily_briefing(
             overview="今日無達門檻訊號。",
             sections=[],
             signal_pool_health={"reason": "no candidates above threshold"},
-            model=JUDGEMENT_MODEL,
+            model=(
+                settings.BRIEFING_MODEL_OPENAI
+                if (settings.BRIEFING_PROVIDER or "openai").lower() == "openai"
+                else settings.BRIEFING_MODEL_GEMINI
+            ),
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         firestore_client.upsert_briefing(briefing)
@@ -297,7 +321,7 @@ def generate_daily_briefing(
     total_judged = len(firestore_client.list_signals_for_briefing(since_iso, min_score=0, limit=2000))
 
     prompt = _render_prompt(candidates, total_judged)
-    payload, input_tokens, output_tokens = gemini_client.generate_json(prompt)
+    payload, input_tokens, output_tokens, model_used = _call_briefing_model(prompt)
     validated = _validate_briefing_payload(payload, candidates, max_sections)
 
     sections = [BriefingSection(**s) for s in validated["sections"]]
@@ -313,9 +337,11 @@ def generate_daily_briefing(
     top_changes = [BriefingTopChange(**tc) for tc in validated["top_changes"]]
     aggregated_watch_points = validated["aggregated_watch_points"]
 
+    provider = (settings.BRIEFING_PROVIDER or "openai").lower()
+    pricing = PROVIDER_PRICING.get(provider, PROVIDER_PRICING["openai"])
     cost_usd = (
-        input_tokens / 1000 * COST_PER_1K_INPUT_TOKENS
-        + output_tokens / 1000 * COST_PER_1K_OUTPUT_TOKENS
+        input_tokens / 1000 * pricing["input"]
+        + output_tokens / 1000 * pricing["output"]
     )
 
     google_doc_id = None
@@ -349,7 +375,7 @@ def generate_daily_briefing(
         signal_pool_health=validated["signal_pool_health"],
         google_doc_id=google_doc_id,
         google_doc_url=google_doc_url,
-        model=JUDGEMENT_MODEL,
+        model=model_used,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_usd=round(cost_usd, 6),

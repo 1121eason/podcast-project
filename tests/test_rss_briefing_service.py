@@ -45,7 +45,7 @@ class FakeGeminiClient:
     def __init__(self, payload):
         self.payload = payload
 
-    def generate_json(self, prompt):
+    def generate_json(self, prompt, model="gemini-2.5-pro"):
         return self.payload, 1500, 400
 
 
@@ -135,7 +135,8 @@ class TestBriefingFlow(unittest.TestCase):
         })
 
         with patch.object(rss_briefing_service, "firestore_client", fake_fc), \
-             patch.object(rss_briefing_service, "gemini_client", fake_g):
+             patch.object(rss_briefing_service, "gemini_client", fake_g), \
+             patch.object(rss_briefing_service.openai_client, "client", None):
             result = rss_briefing_service.generate_daily_briefing(
                 briefing_date="2026-05-07", write_google_doc=False
             )
@@ -180,7 +181,8 @@ class TestBriefingFlow(unittest.TestCase):
             "signal_pool_health": {},
         })
         with patch.object(rss_briefing_service, "firestore_client", fake_fc), \
-             patch.object(rss_briefing_service, "gemini_client", fake_g):
+             patch.object(rss_briefing_service, "gemini_client", fake_g), \
+             patch.object(rss_briefing_service.openai_client, "client", None):
             result = rss_briefing_service.generate_daily_briefing(
                 briefing_date="2026-05-07", write_google_doc=False
             )

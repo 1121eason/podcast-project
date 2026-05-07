@@ -311,7 +311,11 @@ def _call_judgement_model(prompt: str) -> tuple[dict, int, int, str]:
     provider = (settings.JUDGEMENT_PROVIDER or "openai").lower()
     if provider == "openai" and openai_client.is_ready:
         model = settings.JUDGEMENT_MODEL_OPENAI
-        payload, in_tok, out_tok = openai_client.generate_json(prompt, model=model)
+        payload, in_tok, out_tok = openai_client.generate_json(
+            prompt,
+            model=model,
+            reasoning_effort=settings.JUDGEMENT_REASONING_EFFORT,
+        )
         return payload, in_tok, out_tok, model
     # fallback to Gemini
     model = settings.JUDGEMENT_MODEL_GEMINI

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Optional
 
 from app.clients.firestore_client import firestore_client
-from app.clients.gemini_client import JUDGEMENT_MODEL, gemini_client
+from app.clients.gemini_client import gemini_client
+from app.clients.openai_client import openai_client
+from app.core.config import settings
 from app.models.signal import RssBusinessImpactRun, RssSignal
 from app.services.rss_source_service import utc_now_iso
 
@@ -16,8 +18,12 @@ logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "business_impact_v1.txt"
 PROMPT_TEMPLATE: Optional[str] = None
-COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
-COST_PER_1K_OUTPUT_TOKENS = 10.0 / 1000
+
+PROVIDER_PRICING = {
+    "gemini": {"input": 1.25 / 1000, "output": 10.0 / 1000},   # gemini-2.5-pro
+    "openai": {"input": 0.25 / 1000, "output": 2.0 / 1000},     # gpt-5-mini
+}
+
 DEFAULT_MIN_SCORE = 60
 
 
@@ -73,12 +79,28 @@ def _validate_payload(payload: dict) -> dict:
     }
 
 
+def _call_impact_model(prompt: str) -> tuple[dict, int, int, str]:
+    """Returns (payload, input_tokens, output_tokens, model_used)."""
+    provider = (settings.IMPACT_PROVIDER or "openai").lower()
+    if provider == "openai" and openai_client.is_ready:
+        model = settings.IMPACT_MODEL_OPENAI
+        payload, in_tok, out_tok = openai_client.generate_json(
+            prompt,
+            model=model,
+            reasoning_effort=settings.IMPACT_REASONING_EFFORT,
+        )
+        return payload, in_tok, out_tok, model
+    model = settings.IMPACT_MODEL_GEMINI
+    payload, in_tok, out_tok = gemini_client.generate_json(prompt, model=model)
+    return payload, in_tok, out_tok, model
+
+
 def _analyze_one(signal: RssSignal) -> dict[str, object]:
     prompt = _render_prompt(signal)
     last_exc: Optional[Exception] = None
     for attempt in range(2):
         try:
-            payload, input_tokens, output_tokens = gemini_client.generate_json(prompt)
+            payload, input_tokens, output_tokens, model_used = _call_impact_model(prompt)
             validated = _validate_payload(payload)
             return {
                 "signal_id": signal.signal_id,
@@ -86,6 +108,7 @@ def _analyze_one(signal: RssSignal) -> dict[str, object]:
                 "payload": validated,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
+                "model_used": model_used,
             }
         except (json.JSONDecodeError, ValueError, KeyError) as exc:
             last_exc = exc
@@ -154,7 +177,7 @@ def analyze_business_impact(
                 signal.counterfactual = payload["counterfactual"]
                 signal.gap_note = payload["gap_note"]
                 signal.impact_judged_at = utc_now_iso()
-                signal.impact_judge_model = JUDGEMENT_MODEL
+                signal.impact_judge_model = result.get("model_used", "unknown")
                 signal.impact_input_tokens = result["input_tokens"]
                 signal.impact_output_tokens = result["output_tokens"]
                 updated.append(signal)
@@ -164,9 +187,11 @@ def analyze_business_impact(
 
         firestore_client.upsert_rss_signals(updated)
 
+    provider = (settings.IMPACT_PROVIDER or "openai").lower()
+    pricing = PROVIDER_PRICING.get(provider, PROVIDER_PRICING["openai"])
     cost_usd = (
-        total_input_tokens / 1000 * COST_PER_1K_INPUT_TOKENS
-        + total_output_tokens / 1000 * COST_PER_1K_OUTPUT_TOKENS
+        total_input_tokens / 1000 * pricing["input"]
+        + total_output_tokens / 1000 * pricing["output"]
     )
     run = RssBusinessImpactRun(
         run_id=run_id,
@@ -181,7 +206,11 @@ def analyze_business_impact(
         total_output_tokens=total_output_tokens,
         total_cost_usd=round(cost_usd, 6),
         duration_ms=int((time.monotonic() - started) * 1000),
-        impact_model=JUDGEMENT_MODEL,
+        impact_model=(
+            settings.IMPACT_MODEL_OPENAI
+            if provider == "openai"
+            else settings.IMPACT_MODEL_GEMINI
+        ),
         errors=errors[:10],
     )
     firestore_client.create_business_impact_run(run)

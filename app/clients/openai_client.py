@@ -32,16 +32,21 @@ class OpenAIClient:
         prompt: str,
         model: str,
         temperature: float = 0.2,
+        reasoning_effort: Optional[str] = None,
     ) -> tuple[dict, int, int]:
         if not self.is_ready:
             raise RuntimeError(f"OpenAI client not initialized: {self._init_error}")
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            temperature=temperature,
-        )
+        kwargs: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+            "temperature": temperature,
+        }
+        if reasoning_effort and reasoning_effort.lower() in {"minimal", "low", "medium", "high"}:
+            kwargs["reasoning_effort"] = reasoning_effort.lower()
+
+        response = self.client.chat.completions.create(**kwargs)
         choice = response.choices[0]
         text = choice.message.content or ""
         if not text:
@@ -54,6 +59,31 @@ class OpenAIClient:
         input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
         output_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
         return parsed, input_tokens, output_tokens
+
+    def generate_text(
+        self,
+        prompt: str,
+        model: str,
+        temperature: float = 0.4,
+        reasoning_effort: Optional[str] = None,
+    ) -> tuple[str, int, int]:
+        if not self.is_ready:
+            raise RuntimeError(f"OpenAI client not initialized: {self._init_error}")
+
+        kwargs: dict = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+        }
+        if reasoning_effort and reasoning_effort.lower() in {"minimal", "low", "medium", "high"}:
+            kwargs["reasoning_effort"] = reasoning_effort.lower()
+
+        response = self.client.chat.completions.create(**kwargs)
+        text = response.choices[0].message.content or ""
+        usage = response.usage
+        input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        output_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        return text, input_tokens, output_tokens
 
 
 openai_client = OpenAIClient()

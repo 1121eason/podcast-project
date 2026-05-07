@@ -128,7 +128,8 @@ class TestJudgeFlow(unittest.TestCase):
         })
 
         with patch.object(rss_importance_service, "firestore_client", fake_fc), \
-             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+             patch.object(rss_importance_service, "gemini_client", fake_gemini), \
+             patch.object(rss_importance_service.openai_client, "client", None):
             result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
 
         self.assertEqual(result["judged_signal_count"], 1)
@@ -154,7 +155,8 @@ class TestJudgeFlow(unittest.TestCase):
             "heat_vs_importance_note": "",
         })
         with patch.object(rss_importance_service, "firestore_client", fake_fc), \
-             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+             patch.object(rss_importance_service, "gemini_client", fake_gemini), \
+             patch.object(rss_importance_service.openai_client, "client", None):
             result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
         self.assertEqual(result["judged_signal_count"], 0)
         self.assertEqual(result["skipped_already_judged_count"], 1)
@@ -176,7 +178,8 @@ class TestJudgeFlow(unittest.TestCase):
             "heat_vs_importance_note": "",
         })
         with patch.object(rss_importance_service, "firestore_client", fake_fc), \
-             patch.object(rss_importance_service, "gemini_client", fake_gemini):
+             patch.object(rss_importance_service, "gemini_client", fake_gemini), \
+             patch.object(rss_importance_service.openai_client, "client", None):
             result = rss_importance_service.judge_signals(since_hours=4, max_workers=1)
         self.assertEqual(result["judged_signal_count"], 0)
         self.assertEqual(result["skipped_unverified_count"], 1)

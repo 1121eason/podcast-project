@@ -58,7 +58,7 @@ class FakeGeminiClient:
         self.payload = payload
         self.calls = 0
 
-    def generate_json(self, prompt):
+    def generate_json(self, prompt, model="gemini-2.5-pro"):
         self.calls += 1
         return self.payload, 300, 80
 
@@ -103,7 +103,8 @@ class TestAnalyzeFlow(unittest.TestCase):
             "gap_note": "missing SEC filing",
         })
         with patch.object(rss_business_impact_service, "firestore_client", fake_fc), \
-             patch.object(rss_business_impact_service, "gemini_client", fake_g):
+             patch.object(rss_business_impact_service, "gemini_client", fake_g), \
+             patch.object(rss_business_impact_service.openai_client, "client", None):
             result = rss_business_impact_service.analyze_business_impact(max_workers=1)
         self.assertEqual(result["analyzed_signal_count"], 1)
         self.assertEqual(len(fake_fc.upserted), 1)
@@ -115,7 +116,8 @@ class TestAnalyzeFlow(unittest.TestCase):
         fake_fc = FakeFirestoreClient([s])
         fake_g = FakeGeminiClient({})
         with patch.object(rss_business_impact_service, "firestore_client", fake_fc), \
-             patch.object(rss_business_impact_service, "gemini_client", fake_g):
+             patch.object(rss_business_impact_service, "gemini_client", fake_g), \
+             patch.object(rss_business_impact_service.openai_client, "client", None):
             result = rss_business_impact_service.analyze_business_impact(max_workers=1)
         self.assertEqual(result["analyzed_signal_count"], 0)
         self.assertEqual(fake_g.calls, 0)
