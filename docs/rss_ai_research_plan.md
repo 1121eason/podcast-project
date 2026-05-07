@@ -272,20 +272,140 @@ Convert score >= 60 signals into reader-ready briefing copy.
 
 ---
 
-## Phase 5 — Integration with Daily Briefing Flow (Outline)
+## Phase 5 — Podcast Script + Audio + Publish (Designed)
 
-### Goal
+This phase converts the daily editorial briefing (Layer A research base) into a 20-minute spoken Mandarin podcast script (Layer B), then through TTS and the existing publish package flow.
 
-Route Phase 4 output into the existing Google Doc draft → human review → approve → audio → publish package pipeline.
+### Two-layer Architecture
 
-### Plan
+```
+Layer A — Research Base (Phase 4, already in production)
+   ├── Audience: human editor (you)
+   ├── Format: 4 categories × multiple sections, condensed/structured
+   ├── Includes watch_points / counterfactual / gap_note
+   └── Output: Google Doc for review
 
-- `/jobs/daily-briefing/start` reads Phase 4 editorial briefing instead of running `research_v1`.
-- `polling_service` becomes a no-op or a simple wait for human approval.
-- `docs_writer_service` writes the Phase 4 output into a Google Doc.
+Layer B — Podcast Script (Phase 5)
+   ├── Audience: 22-35 zh-TW listeners aspiring to be managers / founders / operators
+   ├── Format: opening + top changes + 6 themed segments + closing
+   ├── Voice: CEO / strategist / operator lens, NOT news anchor
+   ├── Continuity: reads yesterday's briefing too, avoids repetition
+   ├── Length: 6500-7500 zh-TW characters (~20 min spoken)
+   └── Output: script JSON → TTS → audio → publish package
+```
+
+### Brand and Audience (carried over from existing prompt)
+
+- Show name: 「超越未來」.
+- Mandatory opening: 「歡迎收聽，超越未來。」 — every episode, exact wording.
+- Audience: 22-35 zh-TW, future managers / founders / operators / investor mindset.
+- Positioning: morning intelligence for decision-makers, not a news summary feed.
+- Voice: calm, sharp, well-informed strategist / operator — never broadcaster cadence.
+- Goal: train the listener's judgement; not just transmit information.
+
+### Editorial Mandates (from existing prompt, preserved)
+
+For every event, must answer four questions:
+1. What happened.
+2. Why it matters.
+3. Who it affects.
+4. What to watch next.
+
+Editorial qualities:
+1. CEO-style interpretation (rare in zh-TW media).
+2. Easier to follow than traditional business media, but never childish.
+3. More trustworthy than a generic AI summary.
+4. More complete than niche vertical content (connect tech / corporate / political / macro).
+5. More useful for career and judgement growth than general news.
+
+Selection mandates: significance over quantity, rank by strategic importance, avoid weak / repetitive / sensational, group related items.
+
+### Six-theme Mapping (podcast layer)
+
+The Phase 4 briefing uses 4 categories. The podcast script remaps to 6 themes which match the listener's mental model:
+
+| Phase 4 category | Phase 5 podcast theme |
+|---|---|
+| 國際局勢 | 政治與地緣風險 |
+| 國際金融 | 全球財經、市場與關鍵數字 |
+| 科技發展 (split into two themes) | 科技與 AI |
+| 科技發展 (split) | 半導體與供應鏈 |
+| 其他商業趨勢 | 全球企業與商業動作 |
+| (LLM judgement) | 其他值得關注的重要訊號 |
+
+The split of 科技發展 into AI vs semiconductor is intentional — the audience tracks them as separate watchlists. The podcast LLM does this remapping at script generation time.
+
+### Continuity Mechanism (the key unsolved problem from existing prompt)
+
+The original prompt asks for an "ongoing daily series" but provides no input data for the LLM to know what was said yesterday. This is structurally why ChatGPT / Gemini scripts drift and repeat.
+
+Phase 5 fixes this by feeding both today's and yesterday's briefing into the prompt:
+
+- New theme today: cover in full.
+- Continued theme: brief one-line context, then jump to today's update.
+- Same theme but no meaningful update: skip.
+
+Implementation: `firestore_client.list_recent_briefings(limit=2)` returns today + yesterday; the prompt receives both.
+
+### Recommended Script Structure
+
+| Segment | Duration | zh-TW chars | Content |
+|---|---|---|---|
+| Opening | 30s | ~150 | 「歡迎收聽，超越未來。」 + global mood + 3 themes today |
+| Top 4-6 daily changes | 5 min | ~1500 | Ranked by importance, 200-300 chars each |
+| Themed deep dives | 12 min | ~4000 | 3-5 of the 6 themes (skip empty), 600-800 chars each |
+| Closing — what to watch | 2 min | ~600 | Aggregated watch_points + sign-off 「明天見。」 |
+| Total | ~20 min | 6500-7500 | |
+
+### TTS Plan (carried over)
+
+- Current: Google Cloud TTS `cmn-TW-Wavenet-A` (synthetic-sounding).
+- Phase 5 upgrade: try `cmn-TW-Chirp3-HD-*` voices (Google's newer model, drop-in replacement).
+- Future option: ElevenLabs voice clone or Azure conversational style — defer until Chirp3-HD is evaluated.
+- Two-host dialogue mode (Host A + Host B with two voices) is a Phase 5+ extension.
+
+### Show Notes Output
+
+Beside the spoken script, Phase 5 produces a `show_notes` text for Spotify / Apple Podcasts description containing: episode summary, topic list, source URLs grouped by theme.
+
+### Phase 5 Task Plan
+
+| Task | Detail |
+|---|---|
+| 1 Models | `RssPodcastScript` (script text, word_count, themes_covered, themes_skipped, show_notes); `RssPodcastRun` |
+| 2 Prompt | `podcast_script_v1.txt` enforcing brand, audience, voice, four-question rule, 6-theme mapping, continuity rules, length |
+| 3 Service | `rss_podcast_script_service.py` — load today + yesterday briefings, render prompt, parse script, validate length, write to Firestore |
+| 4 API | `POST /podcasts/generate-script` (admin), `GET /podcasts/today`, `GET /podcasts/{id}` |
+| 5 Tests | prompt rendering, continuity logic (yesterday-today diff), length validation, theme remap |
+| 6 Integration | Wire to existing `/jobs/daily-briefing/...` flow: start → Phase 4 briefing → Phase 5 script → human approve → audio → publish |
+| 7 TTS upgrade | Switch `audio_service.py` voice from Wavenet to Chirp3-HD; A/B sample first |
+| 8 n8n W8 | Daily 07:30 (after W7 briefing 07:00): generate podcast script + audio |
+| 9 Acceptance | 5 generated episodes, you mark each ≥ 70% acceptable for narration without manual rewrite |
+
+### Acceptance Criteria
+
+- Word count consistently 6500-7500.
+- 30-second listen of opening passes "does this sound like a CEO podcast" sanity check.
+- 5-day series listen does not feel repetitive (continuity working).
+- Each episode has 4-6 ranked top changes + 3-5 themed deep dives + watch-points closing.
+- Show notes contains all source URLs.
+
+### Existing Prompt Reference
+
+The pre-Phase 5 prompt used in ChatGPT / Gemini deep-research contained the brand, audience, voice, four-question rule, structure, and continuity intent. The Phase 5 prompt is built directly from that document, with the continuity gap closed and the data source switched from "live web search" to "your own pipeline's Layer A briefing".
+
+---
+
+## Phase 5b — Integration with Existing Daily Briefing Flow
+
+The existing `/jobs/daily-briefing/...` flow (`research → polling → docs writer → approve → audio → publish package`) already handles human review and audio production. Phase 5 wires Layer B output into this flow:
+
+- `/jobs/daily-briefing/start` no longer runs `research_v1`. Instead it triggers Phase 4 briefing + Phase 5 script generation.
+- `polling_service` becomes a wait for the script to be ready.
+- `docs_writer_service` writes Layer B (script) into a Google Doc for review.
 - Existing `approve` → `audio` → `publish_package` flow stays unchanged.
 
-No new code modules. Service-layer rewiring only.
+No new code modules in this sub-phase. Service-layer rewiring only.
 
 ---
 

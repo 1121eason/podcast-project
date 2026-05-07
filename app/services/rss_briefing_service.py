@@ -9,7 +9,13 @@ from typing import Optional
 
 from app.clients.firestore_client import firestore_client
 from app.clients.gemini_client import JUDGEMENT_MODEL, gemini_client
-from app.models.signal import BriefingCategory, BriefingSection, RssBriefing, RssSignal
+from app.models.signal import (
+    BriefingCategory,
+    BriefingSection,
+    BriefingTopChange,
+    RssBriefing,
+    RssSignal,
+)
 from app.services.rss_source_service import utc_now_iso
 
 logger = logging.getLogger(__name__)
@@ -58,6 +64,7 @@ def _signal_to_compact(signal: RssSignal) -> dict:
         "publisher": signal.representative_publisher,
         "score": signal.importance_score,
         "impact_type": signal.impact_type,
+        "primary_theme": signal.primary_theme,
         "cluster_status": signal.cluster_status,
         "topic_heat": signal.topic_heat,
         "key_entities": signal.key_entities or [],
@@ -66,12 +73,37 @@ def _signal_to_compact(signal: RssSignal) -> dict:
         "source_count": signal.source_count,
         "summary_excerpt": (signal.representative_summary or "")[:300],
         "reasoning": signal.reasoning,
+        "what_happened": signal.what_happened,
+        "why_matters": signal.why_matters,
+        "who_affected": signal.who_affected,
+        "what_next": signal.what_next,
         "impacted_sectors": signal.impacted_sectors or [],
         "impacted_assets": signal.impacted_assets or [],
         "watch_points": signal.watch_points or [],
         "counterfactual": signal.counterfactual,
         "gap_note": signal.gap_note,
     }
+
+
+def _yesterday_briefing_summary() -> str:
+    """Returns a compact text summary of yesterday's briefing for continuity prompts."""
+    recent = firestore_client.list_recent_briefings(limit=2)
+    if len(recent) < 2:
+        return "（昨日無 briefing 紀錄，視今日為新系列起點）"
+    yesterday = recent[1]
+    parts: list[str] = []
+    parts.append(f"日期: {yesterday.briefing_date}")
+    parts.append(f"總覽: {yesterday.overview[:300]}")
+    if yesterday.top_changes:
+        parts.append("昨日 top changes:")
+        for tc in yesterday.top_changes[:6]:
+            parts.append(f"  - [{tc.importance_score}] {tc.title}")
+    parts.append("昨日 categories 標題:")
+    for cat in yesterday.categories[:4]:
+        section_titles = [s.title for s in cat.sections]
+        if section_titles:
+            parts.append(f"  {cat.title}: {' / '.join(section_titles[:5])}")
+    return "\n".join(parts)
 
 
 def _render_prompt(signals: list[RssSignal], total_judged: int) -> str:
@@ -82,11 +114,13 @@ def _render_prompt(signals: list[RssSignal], total_judged: int) -> str:
         for d in s.desks or []:
             desks[d] += 1
     high_count = sum(1 for s in signals if (s.importance_score or 0) >= 70)
+    yesterday_summary = _yesterday_briefing_summary()
     return template.format(
         signals_json=json.dumps(compact, ensure_ascii=False, indent=2),
         total_judged=total_judged,
         high_importance_count=high_count,
         desk_distribution=", ".join(f"{k}:{v}" for k, v in desks.most_common(5)),
+        yesterday_briefing_summary=yesterday_summary,
     )
 
 
@@ -108,11 +142,40 @@ def _validate_section(raw: dict, candidate_signals: list[RssSignal], section_id:
     return {
         "section_id": section_id,
         "title": title[:80],
-        "summary": summary[:1500],
+        "summary": summary[:2000],
         "importance_score": int(raw.get("importance_score") or 0),
         "impact_type": str(raw.get("impact_type") or ""),
+        "is_continuation": bool(raw.get("is_continuation") or False),
+        "continuation_note": str(raw.get("continuation_note") or "").strip()[:200],
         "impacted_sectors": [str(x) for x in (raw.get("impacted_sectors") or [])][:5],
         "watch_points": [str(x) for x in (raw.get("watch_points") or [])][:5],
+        "referenced_signal_ids": ref_ids[:10],
+        "referenced_urls": ref_urls[:10],
+    }
+
+
+def _validate_top_change(raw: dict, candidate_signals: list[RssSignal], rank: int) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or "").strip()
+    summary = str(raw.get("summary") or "").strip()
+    if not title or not summary:
+        return None
+    valid_signal_ids = {s.signal_id for s in candidate_signals}
+    ref_ids = [str(x) for x in (raw.get("referenced_signal_ids") or []) if str(x) in valid_signal_ids]
+    ref_urls = [str(x) for x in (raw.get("referenced_urls") or [])][:10]
+    if not ref_urls and ref_ids:
+        ref_urls = []
+        for s in candidate_signals:
+            if s.signal_id in ref_ids and s.representative_url:
+                ref_urls.append(s.representative_url)
+    return {
+        "rank": int(raw.get("rank") or rank),
+        "title": title[:80],
+        "summary": summary[:1200],
+        "category_id": str(raw.get("category_id") or ""),
+        "importance_score": int(raw.get("importance_score") or 0),
+        "is_continuation": bool(raw.get("is_continuation") or False),
         "referenced_signal_ids": ref_ids[:10],
         "referenced_urls": ref_urls[:10],
     }
@@ -163,10 +226,28 @@ def _validate_briefing_payload(payload: dict, candidate_signals: list[RssSignal]
     if not isinstance(pool_health, dict):
         pool_health = {}
 
+    raw_top_changes = payload.get("top_changes") or []
+    top_changes: list[dict] = []
+    if isinstance(raw_top_changes, list):
+        for idx, raw in enumerate(raw_top_changes[:8]):
+            validated = _validate_top_change(raw, candidate_signals, idx + 1)
+            if validated:
+                top_changes.append(validated)
+
+    raw_watch = payload.get("aggregated_watch_points") or []
+    watch_points: list[str] = []
+    if isinstance(raw_watch, list):
+        for w in raw_watch[:20]:
+            text = str(w or "").strip()
+            if text:
+                watch_points.append(text[:200])
+
     return {
-        "overview": overview[:1500],
+        "overview": overview[:2000],
+        "top_changes": top_changes,
         "categories": categories,
         "sections": flat_sections,
+        "aggregated_watch_points": watch_points,
         "signal_pool_health": pool_health,
     }
 
@@ -229,6 +310,8 @@ def generate_daily_briefing(
         )
         for c in validated["categories"]
     ]
+    top_changes = [BriefingTopChange(**tc) for tc in validated["top_changes"]]
+    aggregated_watch_points = validated["aggregated_watch_points"]
 
     cost_usd = (
         input_tokens / 1000 * COST_PER_1K_INPUT_TOKENS
@@ -243,7 +326,9 @@ def generate_daily_briefing(
             google_doc_id, google_doc_url = write_briefing_to_doc(
                 briefing_date=briefing_date,
                 overview=validated["overview"],
+                top_changes=top_changes,
                 categories=categories,
+                aggregated_watch_points=aggregated_watch_points,
                 signal_pool_health=validated["signal_pool_health"],
             )
         except Exception as exc:
@@ -257,8 +342,10 @@ def generate_daily_briefing(
         selected_signal_count=len(candidates),
         total_input_signals=total_judged,
         overview=validated["overview"],
+        top_changes=top_changes,
         categories=categories,
         sections=sections,
+        aggregated_watch_points=aggregated_watch_points,
         signal_pool_health=validated["signal_pool_health"],
         google_doc_id=google_doc_id,
         google_doc_url=google_doc_url,

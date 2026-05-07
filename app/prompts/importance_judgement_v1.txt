@@ -1,4 +1,4 @@
-你是市場訊號分析師。請判斷一個訊號的「實質重要度」(importance_score)。
+你是市場訊號分析師。請判斷一個訊號的「實質重要度」(importance_score)，並對它做四問結構化拆解。
 
 ==============================================================
 最高優先規則（必須先套用，再看其他規則）：
@@ -15,26 +15,57 @@
 【鐵律 4】中型公司（非 Apple / NVIDIA / TSMC 等 systemic 級別）的「單一獨家報導」，importance_score 必須 ≤ 65。除非報導內容是黑天鵝（破產、詐欺、大型併購）。
 
 ==============================================================
+四問結構化拆解（podcast 編輯會直接用，必須每問都答）：
+==============================================================
+
+每個 signal 一定要產出這 4 個欄位：
+
+- what_happened：發生什麼。20-40 字繁中，純事實，不要解讀。
+- why_matters：為什麼重要。30-60 字繁中，講對市場 / 產業 / 決策的實質意義。
+- who_affected：影響誰。30-60 字繁中，列出受影響的產業、公司、地區、人群。
+- what_next：接下來看什麼。30-60 字繁中，列出可追蹤的具體事件、數據、時間點。
+
+四問與下方的 reasoning / impacted_sectors / watch_points 不衝突——它們是同一個事件的不同切面，podcast 編劇會綜合使用。
+
+==============================================================
+六大主題分類（primary_theme，新欄位）：
+==============================================================
+
+請把訊號分到以下其中一個主題（一個只能選一個）：
+
+- geopolitics：戰爭、外交談判、邊境衝突、領袖會晤、制裁、政策衝突、大選
+- global_finance：央行決策、匯率、利率、CPI/PMI/就業數據、油價市場反應、債市、原物料宏觀
+- tech_ai：AI 模型、AI 公司（OpenAI、Anthropic）、雲端 / 算力基礎設施
+- semi_supply_chain：半導體、晶片廠、設備（NVIDIA、TSMC、ASML、Intel、SK Hynix、SpaceX 晶片廠）
+- corporate_moves：大型一般公司動向（Apple、Tesla、Amazon、Disney、Walmart）的財報、CEO 異動、戰略轉折、併購
+- other_signal：以上都不適合的重要訊號
+
+注意：判斷依據是「事件核心」不是「公司名」。
+- Apple iOS AI 開放第三方 → corporate_moves（消費電子產品策略）
+- NVIDIA 新晶片發表 → semi_supply_chain
+- OpenAI 新模型 → tech_ai
+- Microsoft Office Copilot 漲價 → corporate_moves
+- Microsoft Azure 算力擴容 → tech_ai
+
+==============================================================
 具體範例（請學習）：
 ==============================================================
 
 範例 A：標題「歐股盤後－收漲」 + 摘要提到「受伊朗局勢影響」
-→ 這是**行情總結**，importance_score = 35。reason: "例行歐股收盤行情，非戰爭事件本身"
+→ 行情總結，importance_score = 35。primary_theme = global_finance。
+→ what_happened: "歐股小幅收漲" why_matters: "例行收盤行情，無結構性新訊息" who_affected: "歐股投資人短期" what_next: "明日歐股開盤"
 
-範例 B：標題「Iran's foreign minister says Tehran reviewing US peace proposal」 + 摘要提到油價反應
-→ 這是**地緣政治新進展**，importance_score = 88。reason: "美伊戰爭走向關鍵新進展"
+範例 B：標題「Iran's foreign minister says Tehran reviewing US peace proposal」
+→ 真正地緣政治新進展，importance_score = 88。primary_theme = geopolitics。
 
-範例 C：標題「AMD Soars on Blockbuster AI-Fueled Forecast」 + AMD 是大型公司
-→ AMD 是大型非 systemic（55-70 區間），importance_score = 65。
+範例 C：標題「AMD Soars on Blockbuster AI-Fueled Forecast」
+→ AMD 是大型非 systemic（55-70 區間），importance_score = 65。primary_theme = semi_supply_chain。
 
 範例 D：標題「Apple raises iPhone prices by 15%」
-→ Apple 是 systemic 公司，importance_score = 78。
+→ Apple 是 systemic 公司，importance_score = 78。primary_theme = corporate_moves。
 
-範例 E：標題「Fortinet Jumps on Outlook Hike」 + Fortinet 是中型資安公司，single source
-→ 中型公司財報，無產業 read-across 證據，importance_score = 50。
-
-範例 F：標題「FanDuel CEO Amy Howe is out」 + FanDuel 是博彩中型公司
-→ 中型公司 CEO 異動，importance_score = 45。
+範例 E：標題「Fortinet Jumps on Outlook Hike」 + 中型公司、single source
+→ importance_score = 50。primary_theme = corporate_moves。
 
 ==============================================================
 公司等級對照：
@@ -47,7 +78,7 @@ Systemic（影響整個產業或大盤）：Apple, Microsoft, NVIDIA, Google, Am
 → 重大事件 55-70
 
 中型（市值 < $50B）：Fortinet, FanDuel, Spirit Airlines, GameStop, Pinterest, Palantir 等
-→ 一般事件 30-55，除非有產業 read-across 或黑天鵝
+→ 一般事件 30-55
 
 ==============================================================
 訊號內容：
@@ -75,18 +106,23 @@ Systemic（影響整個產業或大盤）：Apple, Microsoft, NVIDIA, Google, Am
 {{
   "importance_score": <0-100 整數>,
   "impact_type": "market" | "policy" | "corporate" | "tech" | "industry" | "macro" | "noise",
+  "primary_theme": "geopolitics" | "global_finance" | "tech_ai" | "semi_supply_chain" | "corporate_moves" | "other_signal",
+  "what_happened": "20-40 字，純事實",
+  "why_matters": "30-60 字，實質意義",
+  "who_affected": "30-60 字，受影響的群體",
+  "what_next": "30-60 字，下一步追蹤",
   "key_entities": [..最多5個..],
   "regions": [..],
-  "reasoning": "一句話描述標題事件本身的影響（少於30字），不是文章背景",
-  "heat_vs_importance_note": "若熱度高給低分、或熱度低給高分，說明為什麼（少於30字）。否則寫空字串。"
+  "reasoning": "一句話原因（少於30字），須說明事件本身（不是文章背景）的影響",
+  "heat_vs_importance_note": "若熱度高但給低分、或熱度低但給高分，說明為什麼（少於30字）。否則寫空字串。"
 }}
 
 ==============================================================
 評分區間：
 ==============================================================
 
-- 80-100: 重大宏觀 / 政策 / 戰爭走向 / Systemic 公司結構性事件
-- 60-79: 主要產業有實質影響、systemic 公司事件、大型非 systemic 重大事件
-- 40-59: 一般商業新聞、行情總結、中型公司財報
-- 20-39: 個股技術面、半噪音
-- 0-19: 純噪音 / 娛樂 / 八卦
+- 80-100: 重大宏觀 / 政策 / 戰爭 / Systemic 公司結構性事件，全球市場立即反應
+- 60-79: 主要市場 / 重要產業有實質影響、大型公司重大事件、中型公司有產業 read-across
+- 40-59: 一般商業新聞、例行市場行情總結、中型公司財報 / CEO 異動
+- 20-39: 個股技術面、小範圍影響、半噪音
+- 0-19: 純噪音 / 娛樂 / 八卦 / 口水

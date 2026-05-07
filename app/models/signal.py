@@ -41,6 +41,12 @@ class RssSignal(BaseModel):
     judge_input_tokens: Optional[int] = None
     judge_output_tokens: Optional[int] = None
 
+    what_happened: Optional[str] = None
+    why_matters: Optional[str] = None
+    who_affected: Optional[str] = None
+    what_next: Optional[str] = None
+    primary_theme: Optional[str] = None
+
     impacted_sectors: Optional[list[str]] = None
     impacted_assets: Optional[list[str]] = None
     impacted_regions: Optional[list[str]] = None
@@ -85,6 +91,8 @@ class BriefingSection(BaseModel):
     summary: str
     importance_score: int = 0
     impact_type: Optional[str] = None
+    is_continuation: bool = False
+    continuation_note: str = ""
     impacted_sectors: list[str] = Field(default_factory=list)
     watch_points: list[str] = Field(default_factory=list)
     referenced_signal_ids: list[str] = Field(default_factory=list)
@@ -98,6 +106,17 @@ class BriefingCategory(BaseModel):
     sections: list[BriefingSection] = Field(default_factory=list)
 
 
+class BriefingTopChange(BaseModel):
+    rank: int
+    title: str
+    summary: str
+    category_id: str = ""
+    importance_score: int = 0
+    is_continuation: bool = False
+    referenced_signal_ids: list[str] = Field(default_factory=list)
+    referenced_urls: list[str] = Field(default_factory=list)
+
+
 class RssBriefing(BaseModel):
     briefing_id: str
     briefing_date: str
@@ -108,8 +127,10 @@ class RssBriefing(BaseModel):
     total_input_signals: int = 0
 
     overview: str = ""
+    top_changes: list[BriefingTopChange] = Field(default_factory=list)
     categories: list[BriefingCategory] = Field(default_factory=list)
     sections: list[BriefingSection] = Field(default_factory=list)
+    aggregated_watch_points: list[str] = Field(default_factory=list)
     signal_pool_health: dict = Field(default_factory=dict)
 
     google_doc_id: Optional[str] = None

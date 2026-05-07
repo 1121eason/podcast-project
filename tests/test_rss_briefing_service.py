@@ -29,9 +29,13 @@ class FakeFirestoreClient:
     def __init__(self, signals):
         self.signals = signals
         self.briefing_written = None
+        self.recent_briefings = []
 
     def list_signals_for_briefing(self, since_iso, min_score=70, limit=80):
         return [s for s in self.signals if (s.importance_score or 0) >= min_score][:limit]
+
+    def list_recent_briefings(self, limit=2):
+        return list(self.recent_briefings)[:limit]
 
     def upsert_briefing(self, briefing):
         self.briefing_written = briefing
@@ -63,6 +67,19 @@ class TestBriefingFlow(unittest.TestCase):
         fake_fc = FakeFirestoreClient(signals)
         fake_g = FakeGeminiClient({
             "overview": "今日訊號池呈現地緣政治緩和...",
+            "top_changes": [
+                {
+                    "rank": 1,
+                    "title": "美伊衝突緩和",
+                    "summary": "200 字摘要...",
+                    "category_id": "geopolitics",
+                    "importance_score": 90,
+                    "is_continuation": False,
+                    "referenced_signal_ids": ["s1"],
+                    "referenced_urls": ["https://example.com/1"],
+                }
+            ],
+            "aggregated_watch_points": ["伊朗 48 小時內回應"],
             "categories": [
                 {
                     "category_id": "geopolitics",

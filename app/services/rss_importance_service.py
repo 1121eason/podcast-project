@@ -25,6 +25,15 @@ _VALID_IMPACT_TYPES = {
     "noise",
 }
 
+_VALID_PRIMARY_THEMES = {
+    "geopolitics",
+    "global_finance",
+    "tech_ai",
+    "semi_supply_chain",
+    "corporate_moves",
+    "other_signal",
+}
+
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "importance_judgement_v1.txt"
 PROMPT_TEMPLATE: Optional[str] = None
 COST_PER_1K_INPUT_TOKENS = 1.25 / 1000
@@ -272,9 +281,18 @@ def _validate_payload(payload: dict) -> dict:
     reasoning = str(payload.get("reasoning") or "").strip()
     note = str(payload.get("heat_vs_importance_note") or "").strip()
 
+    primary_theme = str(payload.get("primary_theme") or "other_signal").strip()
+    if primary_theme not in _VALID_PRIMARY_THEMES:
+        primary_theme = "other_signal"
+
     return {
         "importance_score": int(score),
         "impact_type": impact,
+        "primary_theme": primary_theme,
+        "what_happened": str(payload.get("what_happened") or "").strip()[:200],
+        "why_matters": str(payload.get("why_matters") or "").strip()[:300],
+        "who_affected": str(payload.get("who_affected") or "").strip()[:300],
+        "what_next": str(payload.get("what_next") or "").strip()[:300],
         "key_entities": [str(x) for x in key_entities][:5],
         "regions": [str(x) for x in regions][:5],
         "reasoning": reasoning,
@@ -398,6 +416,11 @@ def judge_signals(
                 payload = result["payload"]
                 signal.importance_score = payload["importance_score"]
                 signal.impact_type = payload["impact_type"]
+                signal.primary_theme = payload["primary_theme"]
+                signal.what_happened = payload["what_happened"]
+                signal.why_matters = payload["why_matters"]
+                signal.who_affected = payload["who_affected"]
+                signal.what_next = payload["what_next"]
                 signal.key_entities = payload["key_entities"]
                 signal.regions = payload["regions"]
                 signal.reasoning = payload["reasoning"]
