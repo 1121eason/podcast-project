@@ -97,7 +97,10 @@ class GeminiClient:
             text = response.text or ""
             if not text:
                 raise ValueError("Gemini returned empty json response")
-            parsed = json.loads(text)
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = json.loads(text, strict=False)
             usage = getattr(response, "usage_metadata", None)
             input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0) if usage else 0
             output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0) if usage else 0
