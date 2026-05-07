@@ -49,7 +49,7 @@ class FakeGeminiClient:
         self.output_tokens = output_tokens
         self.calls = []
 
-    def generate_json(self, prompt):
+    def generate_json(self, prompt, model="gemini-2.5-pro"):
         self.calls.append(prompt)
         return self.payload, self.input_tokens, self.output_tokens
 

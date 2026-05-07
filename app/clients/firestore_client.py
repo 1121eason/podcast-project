@@ -2,7 +2,6 @@ from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from app.core.config import settings
-from app.models.job import JobRecord
 from app.models.rss import RssIngestRun, RssItem, RssSource
 from app.models.signal import (
     RssBriefing,
@@ -19,34 +18,9 @@ class FirestoreClient:
     def __init__(self):
         try:
             self.db = firestore.Client(project=settings.GCP_PROJECT_ID, database=settings.FIRESTORE_DATABASE)
-            self.collection = self.db.collection("jobs")
         except Exception as e:
             logger.error(f"Failed to initialize Firestore Client: {e}")
             self.db = None
-            self.collection = None
-        
-    def create_job(self, job_record: JobRecord):
-        if not self.collection:
-            logger.warning("Firestore not initialized, skipping create_job")
-            return
-        doc_ref = self.collection.document(job_record.job_id)
-        doc_ref.set(job_record.model_dump())
-        
-    def update_job(self, job_id: str, update_data: dict):
-        if not self.collection:
-            logger.warning("Firestore not initialized, skipping update_job")
-            return
-        doc_ref = self.collection.document(job_id)
-        doc_ref.update(update_data)
-        
-    def get_job(self, job_id: str) -> Optional[JobRecord]:
-        if not self.collection:
-            logger.warning("Firestore not initialized, returning None for get_job")
-            return None
-        doc = self.collection.document(job_id).get()
-        if doc.exists:
-            return JobRecord(**doc.to_dict())
-        return None
 
     def upsert_rss_source(self, source: RssSource):
         if not self.db:

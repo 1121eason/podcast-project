@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     BRIEFING_TIMEZONE: str = "Australia/Brisbane"
     ENVIRONMENT: str = "dev"
     GEMINI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    JUDGEMENT_PROVIDER: str = "openai"
+    JUDGEMENT_MODEL_OPENAI: str = "gpt-5-mini"
+    JUDGEMENT_MODEL_GEMINI: str = "gemini-2.5-pro"
     ADMIN_TOKEN: Optional[str] = None
     GOOGLE_WORKSPACE_AUTH_MODE: str = "default"
     GOOGLE_OAUTH_CLIENT_SECRET_FILE: str = "client_secret.json"
