@@ -4,7 +4,13 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from app.core.config import settings
 from app.models.job import JobRecord
 from app.models.rss import RssIngestRun, RssItem, RssSource
-from app.models.signal import RssClusteringRun, RssJudgementRun, RssSignal
+from app.models.signal import (
+    RssBriefing,
+    RssBusinessImpactRun,
+    RssClusteringRun,
+    RssJudgementRun,
+    RssSignal,
+)
 from typing import Optional
 
 from app.core.logging import logger
@@ -446,6 +452,84 @@ class FirestoreClient:
             if data:
                 runs.append(RssJudgementRun(**data))
         return runs
+
+    def list_signals_for_impact(
+        self,
+        since_iso: str,
+        min_score: int = 60,
+        limit: int = 200,
+        force: bool = False,
+    ) -> list[RssSignal]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty signals_for_impact")
+            return []
+        query = self.db.collection("rss_signals").where(
+            filter=FieldFilter("generated_at", ">=", since_iso)
+        )
+        signals: list[RssSignal] = []
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            score = data.get("importance_score")
+            if score is None:
+                continue
+            if score < min_score:
+                continue
+            if not force and data.get("impact_judged_at"):
+                continue
+            signals.append(RssSignal(**data))
+        signals.sort(key=lambda s: (s.importance_score or 0), reverse=True)
+        return signals[:limit]
+
+    def list_signals_for_briefing(
+        self,
+        since_iso: str,
+        min_score: int = 70,
+        limit: int = 80,
+    ) -> list[RssSignal]:
+        if not self.db:
+            logger.warning("Firestore not initialized, returning empty signals_for_briefing")
+            return []
+        query = self.db.collection("rss_signals").where(
+            filter=FieldFilter("generated_at", ">=", since_iso)
+        )
+        signals: list[RssSignal] = []
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            score = data.get("importance_score")
+            if score is None or score < min_score:
+                continue
+            signals.append(RssSignal(**data))
+        signals.sort(key=lambda s: (s.importance_score or 0), reverse=True)
+        return signals[:limit]
+
+    def upsert_briefing(self, briefing: RssBriefing):
+        if not self.db:
+            logger.warning("Firestore not initialized, skipping upsert_briefing")
+            return
+        self.db.collection("rss_briefings").document(briefing.briefing_id).set(briefing.model_dump())
+
+    def get_briefing_by_id(self, briefing_id: str) -> Optional[RssBriefing]:
+        if not self.db:
+            return None
+        doc = self.db.collection("rss_briefings").document(briefing_id).get()
+        if doc.exists:
+            return RssBriefing(**doc.to_dict())
+        return None
+
+    def list_recent_briefings(self, limit: int = 7) -> list[RssBriefing]:
+        if not self.db:
+            return []
+        query = (
+            self.db.collection("rss_briefings")
+            .order_by("generated_at", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+        )
+        return [RssBriefing(**doc.to_dict()) for doc in query.stream() if doc.exists]
+
+    def create_business_impact_run(self, run: RssBusinessImpactRun):
+        if not self.db:
+            return
+        self.db.collection("rss_business_impact_runs").document(run.run_id).set(run.model_dump())
 
     def list_top_signals(
         self,

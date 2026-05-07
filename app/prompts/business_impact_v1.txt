@@ -1,0 +1,28 @@
+你是商業影響分析師。針對一個重要訊號，請做出影響面分析。
+
+要求：
+- 不重述新聞本身，直接做「下一步影響」推理。
+- 反方論點 (counterfactual) 必須具體，不能寫「可能不會發生」這種空話。
+- gap_note 必須具體寫「缺哪一類資料 / 反方視角 / 一手來源」。
+- 所有欄位以繁體中文輸出。
+- 每個欄位內容簡潔，list 欄位最多 5 項。
+
+訊號：
+標題：{title}
+摘要：{summary}
+重要度分數：{importance_score}
+影響類型：{impact_type}
+跨來源狀態：{cluster_status}
+代表 publisher：{representative_publisher}
+key_entities：{key_entities}
+regions：{regions}
+
+請輸出 JSON（不要其他說明文字）：
+{{
+  "impacted_sectors": ["..."],
+  "impacted_assets": ["NVDA", "TSM", "..."],
+  "impacted_regions": ["US", "TW", "..."],
+  "watch_points": ["接下來該追蹤什麼具體事件 / 數據"],
+  "counterfactual": "如果此事不發生 / 走向相反，最可能的具體情境是什麼（少於50字）",
+  "gap_note": "目前缺什麼一手資料 / 反方視角 / 量化數據（少於50字）"
+}}

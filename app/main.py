@@ -32,6 +32,7 @@ _materialize_credential_files()
 
 from fastapi import FastAPI
 from app.core.config import settings
+from app.api import routes_briefings
 from app.api import routes_jobs
 from app.api import routes_signals
 from app.api import routes_sources
@@ -45,6 +46,7 @@ app = FastAPI(
 app.include_router(routes_jobs.router, prefix="/jobs", tags=["Jobs"])
 app.include_router(routes_sources.router, prefix="/sources", tags=["Sources"])
 app.include_router(routes_signals.router, prefix="/signals", tags=["Signals"])
+app.include_router(routes_briefings.router, tags=["Briefings"])
 
 @app.get("/health")
 def health_check():
