@@ -49,8 +49,9 @@ class RssSourceServiceTest(unittest.TestCase):
         self.assertEqual(sources[0].health_status, "stable")
         self.assertTrue(sources[0].is_fetchable)
 
-    def test_only_exact_ok_200_status_is_fetchable(self):
+    def test_ok_200_statuses_are_fetchable(self):
         self.assertEqual(classify_health_status("✅ OK (200)"), ("stable", True))
+        self.assertEqual(classify_health_status("200"), ("stable", True))
         self.assertEqual(classify_health_status("成功"), ("not_ok", False))
         self.assertEqual(classify_health_status("OK"), ("not_ok", False))
         self.assertEqual(classify_health_status(""), ("unknown", False))

@@ -18,6 +18,7 @@ HEADER_FEED_URL = "RSS URL"
 HEADER_STATUS = "狀態"
 HEADER_LAST_CHECKED_AT = "上次偵測時間"
 FETCHABLE_STATUS = "✅ OK (200)"
+FETCHABLE_STATUSES = {FETCHABLE_STATUS, "200"}
 
 
 def utc_now_iso() -> str:
@@ -39,7 +40,7 @@ def _source_id_suffix(feed_url: str) -> str:
 
 def classify_health_status(raw_status: str) -> tuple[str, bool]:
     raw_status = _clean(raw_status)
-    if raw_status == FETCHABLE_STATUS:
+    if raw_status in FETCHABLE_STATUSES:
         return "stable", True
 
     status = raw_status.lower()
