@@ -329,7 +329,7 @@ class FirestoreClient:
         for item_id, update_data in item_updates.items():
             batch.update(collection.document(item_id), update_data)
             operation_count += 1
-            if operation_count >= 100:
+            if operation_count >= 50:
                 batch.commit()
                 batch = self.db.batch()
                 operation_count = 0
@@ -371,7 +371,7 @@ class FirestoreClient:
         for signal in signals:
             batch.set(collection.document(signal.signal_id), signal.model_dump())
             operation_count += 1
-            if operation_count >= 450:
+            if operation_count >= 50:
                 batch.commit()
                 batch = self.db.batch()
                 operation_count = 0
