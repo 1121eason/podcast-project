@@ -17,8 +17,15 @@ class GeminiClient:
                 self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
                 logger.info("Initialized Gemini Client via AI Studio API Key.")
             elif settings.GCP_PROJECT_ID:
-                self.client = genai.Client(vertexai=True, project=settings.GCP_PROJECT_ID, location="us-central1")
-                logger.info("Initialized Gemini Client via GCP Vertex AI.")
+                self.client = genai.Client(
+                    vertexai=True,
+                    project=settings.GCP_PROJECT_ID,
+                    location=settings.VERTEX_LOCATION,
+                )
+                logger.info(
+                    "Initialized Gemini Client via GCP Vertex AI (location=%s).",
+                    settings.VERTEX_LOCATION,
+                )
             else:
                 import warnings
                 warnings.warn("No API key or GCP Project ID provided.")

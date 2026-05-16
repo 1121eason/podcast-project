@@ -1,8 +1,10 @@
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 from app.clients.firestore_client import firestore_client
 from app.models.signal import RssSignal
+from app.services.log_summary_utils import add_log_summary, seconds_text, tagged
 from app.services.publisher_groups import count_independent_groups
 from app.services.rss_source_service import utc_now_iso
 
@@ -50,6 +52,7 @@ def _since_iso(hours: int) -> str:
 
 
 def verify_signals(since_hours: int = 24, force: bool = False) -> dict[str, object]:
+    started = time.monotonic()
     since_iso = _since_iso(since_hours)
     signals = firestore_client.list_recent_signals(since_iso, limit=2000)
 
@@ -60,14 +63,17 @@ def verify_signals(since_hours: int = 24, force: bool = False) -> dict[str, obje
         candidates.append(signal)
 
     if not candidates:
-        return {
+        result = {
             "since_hours": since_hours,
             "total_signal_count": len(signals),
             "verified_signal_count": 0,
             "skipped_already_verified_count": len(signals),
             "status_distribution": {},
             "heat_distribution": {},
+            "duration_ms": int((time.monotonic() - started) * 1000),
         }
+        add_log_summary(result, _compose_verify_log_summary(result))
+        return result
 
     verified_at = utc_now_iso()
     status_counts: dict[str, int] = {}
@@ -85,7 +91,7 @@ def verify_signals(since_hours: int = 24, force: bool = False) -> dict[str, obje
 
     firestore_client.upsert_rss_signals(updates)
 
-    return {
+    result = {
         "since_hours": since_hours,
         "verified_at": verified_at,
         "total_signal_count": len(signals),
@@ -93,4 +99,27 @@ def verify_signals(since_hours: int = 24, force: bool = False) -> dict[str, obje
         "skipped_already_verified_count": len(signals) - len(updates),
         "status_distribution": status_counts,
         "heat_distribution": heat_counts,
+        "duration_ms": int((time.monotonic() - started) * 1000),
     }
+    add_log_summary(result, _compose_verify_log_summary(result))
+    return result
+
+
+def _compose_verify_log_summary(result: dict[str, object]) -> list[str]:
+    status_distribution = result.get("status_distribution") if isinstance(result.get("status_distribution"), dict) else {}
+    heat_distribution = result.get("heat_distribution") if isinstance(result.get("heat_distribution"), dict) else {}
+    status_text = ", ".join(f"{k}={v}" for k, v in status_distribution.items()) or "無新驗證"
+    heat_text = ", ".join(f"{k}={v}" for k, v in heat_distribution.items()) or "無新驗證"
+    return [
+        tagged(
+            "ok",
+            (
+                f"W5 Verify 檢查 {result.get('total_signal_count', 0)} 個 signal，"
+                f"更新 {result.get('verified_signal_count', 0)} 個，"
+                f"已驗證略過 {result.get('skipped_already_verified_count', 0)} 個。"
+            ),
+        ),
+        tagged("ok", f"cluster_status 分布：{status_text}。"),
+        tagged("ok", f"topic_heat 分布：{heat_text}。"),
+        tagged("time", f"總耗時 {seconds_text(result.get('duration_ms'))}。"),
+    ]

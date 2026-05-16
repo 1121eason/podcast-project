@@ -31,10 +31,14 @@ def _materialize_credential_files() -> None:
 _materialize_credential_files()
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.api import routes_briefings
+from app.api import routes_podcasts
+from app.api import routes_admin
 from app.api import routes_signals
 from app.api import routes_sources
+from app.api import routes_threads
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -45,6 +49,13 @@ app = FastAPI(
 app.include_router(routes_sources.router, prefix="/sources", tags=["Sources"])
 app.include_router(routes_signals.router, prefix="/signals", tags=["Signals"])
 app.include_router(routes_briefings.router, tags=["Briefings"])
+app.include_router(routes_podcasts.router, tags=["Podcasts"])
+app.include_router(routes_threads.router, tags=["Threads"])
+app.include_router(routes_admin.router, prefix="/admin", tags=["Admin"])
+
+_VIEWER_DIR = Path(__file__).parent / "static" / "viewer"
+if _VIEWER_DIR.exists():
+    app.mount("/viewer", StaticFiles(directory=str(_VIEWER_DIR), html=True), name="viewer")
 
 @app.get("/health")
 def health_check():

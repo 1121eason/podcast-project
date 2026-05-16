@@ -52,6 +52,32 @@ class RssItem(BaseModel):
     embedded_at: Optional[str] = None
     signal_id: Optional[str] = None
 
+    article_extract_status: str = ""
+    article_lead: str = ""
+    article_text_hash: Optional[str] = None
+    article_extracted_at: Optional[str] = None
+
+    # canonical_event: deprecated by Plan A — kept for migration backward-compat (read-only)
+    canonical_event: dict = Field(default_factory=dict)
+    canonical_event_text: str = ""
+    canonical_event_hash: Optional[str] = None
+    canonicalized_at: Optional[str] = None
+    canonical_model: Optional[str] = None
+
+    # item_signals: mechanical replacement for canonical_event (Plan A, no LLM)
+    item_signals: dict = Field(default_factory=dict)
+    item_signals_hash: Optional[str] = None
+    item_signals_at: Optional[str] = None
+
+    event_embedding: Optional[list[float]] = None
+    entity_embedding: Optional[list[float]] = None
+    impact_embedding: Optional[list[float]] = None
+    context_embedding: Optional[list[float]] = None
+    event_embedding_hash: Optional[str] = None
+    embedding_version: str = ""
+    v2_processed_at: Optional[str] = None
+    v2_processing_hash: Optional[str] = None
+
 
 class RssIngestRun(BaseModel):
     run_id: str
@@ -69,4 +95,5 @@ class RssIngestRun(BaseModel):
     max_workers: int = 10
     window_start: Optional[str] = None
     skipped_old_item_count: int = 0
+    skipped_existing_item_count: int = 0
     source_results: list[dict[str, object]] = Field(default_factory=list)

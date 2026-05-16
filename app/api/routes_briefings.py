@@ -3,6 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.api.model_routing_payloads import ModelRouteOverride, dump_model_overrides
 from app.clients.firestore_client import firestore_client
 from app.core.security import require_admin_token
 from app.services.rss_briefing_service import generate_daily_briefing
@@ -17,6 +18,8 @@ class BusinessImpactRequest(BaseModel):
     max_workers: int = Field(default=5, ge=1, le=10)
     force: bool = False
     max_signals_per_run: int = Field(default=100, ge=1, le=500)
+    run_bucket: Optional[str] = None
+    model_overrides: Optional[dict[str, ModelRouteOverride]] = None
 
 
 class BriefingRequest(BaseModel):
@@ -25,6 +28,8 @@ class BriefingRequest(BaseModel):
     max_sections: int = Field(default=10, ge=1, le=20)
     max_signals_input: int = Field(default=80, ge=5, le=200)
     write_google_doc: bool = True
+    run_bucket: Optional[str] = None
+    model_overrides: Optional[dict[str, ModelRouteOverride]] = None
 
 
 @router.post("/signals/business-impact")
@@ -40,6 +45,8 @@ def business_impact_endpoint(
             max_workers=request.max_workers,
             force=request.force,
             max_signals_per_run=request.max_signals_per_run,
+            run_bucket=request.run_bucket,
+            model_overrides=dump_model_overrides(request.model_overrides),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -58,6 +65,8 @@ def briefing_generate_endpoint(
             max_sections=request.max_sections,
             max_signals_input=request.max_signals_input,
             write_google_doc=request.write_google_doc,
+            run_bucket=request.run_bucket,
+            model_overrides=dump_model_overrides(request.model_overrides),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

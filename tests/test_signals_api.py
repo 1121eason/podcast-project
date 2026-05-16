@@ -19,6 +19,10 @@ class TestSignalsApi(unittest.TestCase):
         response = self.client.post("/signals/embed")
         self.assertEqual(response.status_code, 401)
 
+    def test_process_new_items_requires_admin_token(self):
+        response = self.client.post("/signals/process-new-items")
+        self.assertEqual(response.status_code, 401)
+
     def test_cluster_calls_service(self):
         from app.api import routes_signals
 
@@ -38,6 +42,57 @@ class TestSignalsApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["run_id"], "fake_run")
         self.assertEqual(captured["window_hours"], 6)
+
+    def test_process_new_items_calls_service(self):
+        from app.api import routes_signals
+
+        captured = {}
+
+        def fake_process_new_items(**kwargs):
+            captured.update(kwargs)
+            return {"processed_item_count": 2, "skipped_duplicate": False}
+
+        with patch.object(routes_signals, "process_new_items", side_effect=fake_process_new_items):
+            response = self.client.post(
+                "/signals/process-new-items",
+                headers={"X-Admin-Token": _get_admin_token()},
+                json={
+                    "since_hours": 6,
+                    "limit_items": 25,
+                    "run_bucket": "UTC_TEST",
+                    "model_overrides": {
+                        "w4_match_adjudication": {
+                            "provider": "gemini",
+                            "model": "gemini-2.5-flash",
+                        }
+                    },
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["processed_item_count"], 2)
+        self.assertEqual(captured["limit_items"], 25)
+        self.assertEqual(captured["run_bucket"], "UTC_TEST")
+        self.assertEqual(captured["model_overrides"]["w4_match_adjudication"]["model"], "gemini-2.5-flash")
+
+    def test_consolidate_daily_calls_service(self):
+        from app.api import routes_signals
+
+        captured = {}
+
+        def fake_consolidate_daily(**kwargs):
+            captured.update(kwargs)
+            return {"threads_updated": 3, "skipped_duplicate": False}
+
+        with patch.object(routes_signals, "consolidate_daily", side_effect=fake_consolidate_daily):
+            response = self.client.post(
+                "/signals/consolidate-daily",
+                headers={"X-Admin-Token": _get_admin_token()},
+                json={"since_hours": 36, "story_lookback_days": 30, "run_bucket": "DAILY_TEST"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["threads_updated"], 3)
+        self.assertEqual(captured["story_lookback_days"], 30)
+        self.assertEqual(captured["run_bucket"], "DAILY_TEST")
 
     def test_recent_signals(self):
         from app.api import routes_signals

@@ -64,11 +64,23 @@ class FakeGeminiClient:
 
 
 class TestPromptRendering(unittest.TestCase):
-    def test_prompt_includes_fields(self):
+    def test_prompt_includes_descriptive_fields(self):
+        """Prompt should include event-describing fields (title, entities, regions, publisher)."""
         s = make_signal(representative_title="Anthropic raises $1.5B")
         prompt = rss_business_impact_service._render_prompt(s)
         self.assertIn("Anthropic raises $1.5B", prompt)
-        self.assertIn("75", prompt)
+        self.assertIn("Anthropic", prompt)  # key_entities
+        self.assertIn("CNBC", prompt)        # representative_publisher
+
+    def test_prompt_excludes_judge_and_verify_outputs(self):
+        """W5 principle: W6 prompt must not include importance_score or cluster_status,
+        otherwise LLM may bias depth of analysis toward Judge's score or Verify's count."""
+        s = make_signal(importance_score=75, cluster_status="partially_supported")
+        prompt = rss_business_impact_service._render_prompt(s)
+        self.assertNotIn("75", prompt)
+        self.assertNotIn("partially_supported", prompt)
+        self.assertNotIn("重要度", prompt)
+        self.assertNotIn("跨來源", prompt)
 
 
 class TestValidatePayload(unittest.TestCase):
@@ -107,6 +119,8 @@ class TestAnalyzeFlow(unittest.TestCase):
              patch.object(rss_business_impact_service.openai_client, "client", None):
             result = rss_business_impact_service.analyze_business_impact(max_workers=1)
         self.assertEqual(result["analyzed_signal_count"], 1)
+        self.assertEqual(result["log_summary_version"], 1)
+        self.assertTrue(any("W6 影響分析" in line for line in result["log_summary"]))
         self.assertEqual(len(fake_fc.upserted), 1)
         self.assertEqual(fake_fc.upserted[0].impacted_sectors, ["AI", "semiconductor"])
         self.assertIsNotNone(fake_fc.upserted[0].impact_judged_at)

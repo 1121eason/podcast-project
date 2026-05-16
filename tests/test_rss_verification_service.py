@@ -135,6 +135,8 @@ class TestVerifySignalsFlow(unittest.TestCase):
         with patch.object(rss_verification_service, "firestore_client", fake_fc):
             result = verify_signals(since_hours=24)
         self.assertEqual(result["verified_signal_count"], 2)
+        self.assertEqual(result["log_summary_version"], 1)
+        self.assertTrue(any("W5 Verify" in line for line in result["log_summary"]))
         self.assertEqual(len(fake_fc.upserted), 2)
         s1 = next(s for s in fake_fc.upserted if s.signal_id == "s1")
         s2 = next(s for s in fake_fc.upserted if s.signal_id == "s2")

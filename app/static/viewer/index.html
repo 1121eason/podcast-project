@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <title>Story Thread Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="viewer.css" />
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Story Thread Viewer</h1>
+        <div class="toolbar">
+            <label class="toggle">
+                <input type="checkbox" id="show-importance" />
+                顯示 W5 影響（透明度 = importance）
+            </label>
+            <label class="toggle">
+                <input type="checkbox" id="filter-flags" />
+                只看異常 thread（mismatch / repeat）
+            </label>
+            <span class="legend">
+                <span class="dot status-emerging"></span>emerging
+                <span class="dot status-active"></span>active
+                <span class="dot status-dormant"></span>dormant
+                <span class="dot status-resolved"></span>resolved
+            </span>
+        </div>
+    </header>
+    <main>
+        <aside id="sidebar">
+            <div id="sidebar-header">
+                <input id="search" placeholder="搜尋 thread 標題…" />
+                <div class="muted" id="sidebar-meta"></div>
+            </div>
+            <ul id="thread-list"></ul>
+        </aside>
+        <section id="canvas-wrap">
+            <div id="canvas-empty">← 從左側選一條 thread</div>
+            <div id="cy"></div>
+        </section>
+        <aside id="detail">
+            <div id="detail-empty">點擊節點看細節</div>
+            <div id="detail-content" hidden></div>
+        </aside>
+    </main>
+    <script src="viewer.js"></script>
+</body>
+</html>

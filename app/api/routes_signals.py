@@ -4,11 +4,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.api.model_routing_payloads import ModelRouteOverride, dump_model_overrides
 from app.clients.firestore_client import firestore_client
 from app.core.security import require_admin_token
 from app.services.rss_clustering_service import run_clustering
 from app.services.rss_embedding_service import embed_pending_items
 from app.services.rss_importance_service import judge_signals
+from app.services.rss_signal_processor_service import process_new_items
+from app.services.rss_story_thread_service import consolidate_daily
 from app.services.rss_verification_service import verify_signals
 
 router = APIRouter()
@@ -33,6 +36,29 @@ class JudgeRequest(BaseModel):
     max_workers: int = Field(default=5, ge=1, le=10)
     force: bool = False
     max_signals_per_run: int = Field(default=200, ge=1, le=2000)
+    quality_gate: str = "supported_or_promoted"
+    run_bucket: Optional[str] = None
+    model_overrides: Optional[dict[str, ModelRouteOverride]] = None
+
+
+class SignalProcessRequest(BaseModel):
+    since_hours: int = Field(default=6, ge=1, le=72)
+    limit_items: int = Field(default=250, ge=1, le=2000)
+    max_workers: int = Field(default=5, ge=1, le=20)
+    article_extraction: str = "selective"
+    canonicalize: str = "selective"
+    embed: bool = True
+    match: bool = True
+    run_bucket: Optional[str] = None
+    model_overrides: Optional[dict[str, ModelRouteOverride]] = None
+
+
+class ConsolidateDailyRequest(BaseModel):
+    since_hours: int = Field(default=36, ge=1, le=336)
+    story_lookback_days: int = Field(default=30, ge=1, le=180)
+    max_threads: int = Field(default=200, ge=1, le=1000)
+    run_bucket: Optional[str] = None
+    model_overrides: Optional[dict[str, ModelRouteOverride]] = None
 
 
 def _since_iso(hours: int) -> str:
@@ -67,6 +93,28 @@ def embed_signals(
     request = request or EmbedRequest()
     try:
         return embed_pending_items(window_hours=request.window_hours)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/process-new-items")
+def process_new_items_endpoint(
+    request: SignalProcessRequest | None = None,
+    _: None = Depends(require_admin_token),
+):
+    request = request or SignalProcessRequest()
+    try:
+        return process_new_items(
+            since_hours=request.since_hours,
+            limit_items=request.limit_items,
+            max_workers=request.max_workers,
+            article_extraction=request.article_extraction,
+            canonicalize=request.canonicalize,
+            embed=request.embed,
+            match=request.match,
+            run_bucket=request.run_bucket,
+            model_overrides=dump_model_overrides(request.model_overrides),
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -138,6 +186,27 @@ def judge_endpoint(
             max_workers=request.max_workers,
             force=request.force,
             max_signals_per_run=request.max_signals_per_run,
+            quality_gate=request.quality_gate,
+            run_bucket=request.run_bucket,
+            model_overrides=dump_model_overrides(request.model_overrides),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/consolidate-daily")
+def consolidate_daily_endpoint(
+    request: ConsolidateDailyRequest | None = None,
+    _: None = Depends(require_admin_token),
+):
+    request = request or ConsolidateDailyRequest()
+    try:
+        return consolidate_daily(
+            since_hours=request.since_hours,
+            story_lookback_days=request.story_lookback_days,
+            max_threads=request.max_threads,
+            run_bucket=request.run_bucket,
+            model_overrides=dump_model_overrides(request.model_overrides),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

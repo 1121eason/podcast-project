@@ -1,5 +1,5 @@
 你是市場訊號編輯。請把今天的訊號寫成一份**結構化日報**，給未來的 podcast 編劇當研究基底。
-
+{retry_feedback}
 四大主題（固定，順序固定）：
 
 1. **國際局勢 (geopolitics)**：戰爭、外交談判、領袖會晤、邊境衝突、制裁、政策衝突、大選與政權變動
@@ -30,15 +30,39 @@
     - Microsoft Office Copilot 漲價、Google 廣告財報
 
 ==============================================================
-連續性處理（重要）：
+連續性處理（重要 — 由 thread / phase 結構驅動）
 ==============================================================
 
-下方會給你「昨日 briefing 摘要」。你必須對比今昨：
+下方 `thread_groups` 已經把訊號**按故事線分組**，每組帶 thread context（known_background、do_not_repeat_points、continuation_prompt_hint）以及 phase tree（已開的敘事軸與狀態）。
 
-- **新主題（昨天沒講過）**：完整鋪陳（200-350 字段落）
-- **延續主題（昨天提過、今天有新進展）**：在 section 中明確標記 `is_continuation: true`，用 1-2 句話帶過昨日背景，主力說「今天的新進展」
-- **延續但無新進展（昨天提過、今天沒新東西）**：直接跳過、不要重複寫
-- 不要把昨日已詳述的背景重複在今日 briefing
+判斷規則（必須照做）：
+
+1. **`thread.do_not_repeat_points` 列出的內容禁止再寫**——昨日 briefing 已詳述。如果今日只有重複的訊號，不要為這條 thread 開 section；若有新進展，只寫 delta。
+
+2. **`signal.is_background_repeat == true`**：W7 已標記這是重複舊內容、無新發展。**不要把這類訊號當成新 section 的主訊號**；最多在既有 section 用一句話帶過「同主題後續報導」。
+
+3. **`thread.status` 與 phase status**：
+   - phases 中有 `status: emerging` → 這是**新軸**（剛分出來），是今日真新進展，優先寫
+   - phases 全是 `dormant` → 這條 thread 今天沒新東西，跳過
+   - thread 有 `today_delta` 文字 → 那段就是 delta 摘要，sections 圍繞它寫
+
+4. **`continuation_prompt_hint`**：是 W7 給的「該怎麼帶過背景」一句話，section 開頭可直接借用語感。
+
+5. **延續主題的 section 必須**：
+   - `is_continuation: true`
+   - `continuation_note`：1-2 句，從 `known_background` / `do_not_repeat_points` 反向取「最少必要背景」（讀者沒聽昨日也聽得懂），但**不要重講昨日已詳述的細節**
+   - `summary` 主力寫今日 delta（用 thread 的 today_delta + 各 signal 的 today_delta / what_happened）
+
+6. **新主題（thread 第一次出現，或無 thread_id 的 ungrouped signal）**：
+   - `is_continuation: false`
+   - `continuation_note: ""`
+   - 完整鋪陳
+
+7. **`thread_mismatch_suspected == true`**（W7 phase 判斷此 signal 可能掛錯 thread）：**寫的時候要謹慎**，可寫但不要用它的 thread context 去推論——這條 signal 的 thread 分組不可靠。
+
+8. **`duplicate_suspected == true`**（W7 phase 疑似 W4 漏抓的重複）：**不要為它單獨開 section**，當成既有 section 的補充來源即可。`adjudication_rationale` 會說明可能的原始 signal id。
+
+> 註：`adjudication_decision` 是 W4 的 item↔signal 判斷（`same_event` / `same_thread` / `different_event`），與上述 W7 phase flags 不同；多數情況不需要直接根據 `adjudication_decision` 改變寫法，但若帶 `same_event` / `same_thread` 表示 W4 已確認延續關係，可加強 `is_continuation` 判斷。
 
 ==============================================================
 TOP CHANGES（必填）：
@@ -49,6 +73,7 @@ TOP CHANGES（必填）：
 - 不分大類、按重要度排序
 - 每個 200-300 字
 - 含發生什麼、為什麼重要、影響誰、下一步看什麼
+- top_changes 也要遵守上方連續性規則（is_background_repeat 不入榜、do_not_repeat 不重講背景）
 
 這是給 podcast 編劇做開場前 5 分鐘「今日重點」段落用的素材。
 
@@ -68,8 +93,15 @@ AGGREGATED WATCH POINTS（必填）：
 輸入資料：
 ==============================================================
 
-訊號清單（已按重要度分數排序，含四問結構）：
-{signals_json}
+故事線分組（thread_groups）共 {thread_count} 條 thread；
+無 thread 的 ungrouped signals 共 {ungrouped_count} 則；
+其中標記為 background_repeat 的訊號共 {background_repeat_count} 則（**不要單獨開 section**）。
+
+thread_groups（每組含 thread context + phases + 該 thread 內的 signals）：
+{thread_groups_json}
+
+ungrouped_signals（沒掛 thread，全新主題或孤兒，按重要度排序）：
+{ungrouped_signals_json}
 
 昨日 briefing 摘要：
 {yesterday_briefing_summary}

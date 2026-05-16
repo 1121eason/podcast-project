@@ -32,6 +32,7 @@ class FakeFirestore:
         self.sources = sources
         self.items = {}
         self.runs = []
+        self.source_status_updates = []
 
     def list_rss_sources(self, fetchable_only=False):
         if fetchable_only:
@@ -40,7 +41,6 @@ class FakeFirestore:
 
     def upsert_rss_item(self, item):
         if item.item_id in self.items:
-            self.items[item.item_id] = item
             return False
         self.items[item.item_id] = item
         return True
@@ -48,19 +48,19 @@ class FakeFirestore:
     def upsert_rss_items(self, items):
         new_item_count = 0
         updated_item_count = 0
+        skipped_existing_item_count = 0
         for item in items:
             if self.upsert_rss_item(item):
                 new_item_count += 1
             else:
-                updated_item_count += 1
-        return new_item_count, updated_item_count
+                skipped_existing_item_count += 1
+        return new_item_count, updated_item_count, skipped_existing_item_count
 
     def create_rss_ingest_run(self, run):
         self.runs.append(run)
 
     def update_rss_source_ingest_results(self, source_results, ingested_at):
-        self.source_results = source_results
-        self.ingested_at = ingested_at
+        self.source_status_updates.append((source_results, ingested_at))
 
 
 class RssIngestServiceTest(unittest.TestCase):
@@ -106,12 +106,16 @@ class RssIngestServiceTest(unittest.TestCase):
 
         self.assertEqual(first_run["new_item_count"], 2)
         self.assertEqual(first_run["failed_source_count"], 1)
-        self.assertEqual(first_run["timeout_seconds"], 10)
+        self.assertEqual(first_run["log_summary_version"], 1)
+        self.assertTrue(any("W2 RSS ingest" in line for line in first_run["log_summary"]))
+        self.assertTrue(any("upstream 503" in line for line in first_run["log_summary"]))
+        self.assertEqual(first_run["timeout_seconds"], 25)
         self.assertEqual(len(first_run["source_results"]), 2)
         self.assertEqual(first_run["skipped_old_item_count"], 0)
-        self.assertEqual(len(fake_firestore.source_results), 2)
+        self.assertEqual(fake_firestore.source_status_updates, [])
         self.assertEqual(second_run["new_item_count"], 0)
-        self.assertEqual(second_run["updated_item_count"], 2)
+        self.assertEqual(second_run["updated_item_count"], 0)
+        self.assertEqual(second_run["skipped_existing_item_count"], 2)
 
     def test_ingest_accepts_timeout_and_worker_options(self):
         sources = [

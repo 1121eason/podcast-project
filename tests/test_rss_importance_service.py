@@ -134,6 +134,8 @@ class TestJudgeFlow(unittest.TestCase):
 
         self.assertEqual(result["judged_signal_count"], 1)
         self.assertEqual(result["score_80plus_count"], 1)
+        self.assertEqual(result["log_summary_version"], 1)
+        self.assertTrue(any("W5 Judge" in line for line in result["log_summary"]))
         self.assertEqual(len(fake_fc.upserted), 1)
         self.assertEqual(fake_fc.upserted[0].importance_score, 82)
         self.assertEqual(fake_fc.upserted[0].impact_type, "market")

@@ -12,12 +12,29 @@ import xml.etree.ElementTree as ET
 
 from app.clients.firestore_client import firestore_client
 from app.models.rss import RssIngestRun, RssItem, RssSource
+from app.services.log_summary_utils import (
+    add_log_summary,
+    sample_from_dicts,
+    sample_values,
+    seconds_text,
+    tagged,
+)
 from app.services.rss_source_service import utc_now_iso
 
 
 USER_AGENT = "SignalBriefRSSBot/1.0"
-DEFAULT_FEED_TIMEOUT_SECONDS = 10
+DEFAULT_FEED_TIMEOUT_SECONDS = 25
 DEFAULT_MAX_WORKERS = 10
+DEFAULT_RSSHUB_WORKERS = 2
+DEFAULT_GOV_WORKERS = 3
+RSSHUB_HOST_MARKER = "zeabur.app"
+GOV_HOST_MARKERS = (".gov", ".bls.gov", ".cftc.gov", ".ftc.gov", ".sec.gov", ".cisa.gov", ".treasury.gov")
+
+
+def _is_gov_url(url: str) -> bool:
+    if not url:
+        return False
+    return any(marker in url for marker in GOV_HOST_MARKERS)
 
 def _clean_text(value: object) -> str:
     text = html.unescape(str(value or ""))
@@ -184,6 +201,7 @@ def _ingest_one_source(
         "item_count": 0,
         "new_item_count": 0,
         "updated_item_count": 0,
+        "skipped_existing_item_count": 0,
         "skipped_old_item_count": 0,
         "error": None,
         "error_type": None,
@@ -206,8 +224,9 @@ def _ingest_one_source(
 
         new_item_count = 0
         updated_item_count = 0
+        skipped_existing_item_count = 0
         write_started = time.monotonic()
-        new_item_count, updated_item_count = firestore_client.upsert_rss_items(items)
+        new_item_count, updated_item_count, skipped_existing_item_count = firestore_client.upsert_rss_items(items)
         result["write_duration_ms"] = int((time.monotonic() - write_started) * 1000)
 
         result.update(
@@ -216,6 +235,7 @@ def _ingest_one_source(
                 "item_count": len(items),
                 "new_item_count": new_item_count,
                 "updated_item_count": updated_item_count,
+                "skipped_existing_item_count": skipped_existing_item_count,
                 "skipped_old_item_count": skipped_old_item_count,
             }
         )
@@ -255,13 +275,38 @@ def ingest_rss_sources(
         window_start = run_started_at - timedelta(hours=since_hours)
         window_start_iso = window_start.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
+    rsshub_sources = [s for s in sources if RSSHUB_HOST_MARKER in (s.feed_url or "")]
+    gov_sources = [
+        s for s in sources
+        if RSSHUB_HOST_MARKER not in (s.feed_url or "") and _is_gov_url(s.feed_url or "")
+    ]
+    other_sources = [
+        s for s in sources
+        if RSSHUB_HOST_MARKER not in (s.feed_url or "") and not _is_gov_url(s.feed_url or "")
+    ]
+
     source_results = []
     if sources:
-        with ThreadPoolExecutor(max_workers=min(max_workers, len(sources))) as executor:
+        other_workers = max(1, min(max_workers, len(other_sources) or 1))
+        rsshub_workers = max(1, min(DEFAULT_RSSHUB_WORKERS, len(rsshub_sources) or 1))
+        gov_workers = max(1, min(DEFAULT_GOV_WORKERS, len(gov_sources) or 1))
+        with (
+            ThreadPoolExecutor(max_workers=other_workers, thread_name_prefix="rss-direct") as exe_other,
+            ThreadPoolExecutor(max_workers=rsshub_workers, thread_name_prefix="rss-rsshub") as exe_rsshub,
+            ThreadPoolExecutor(max_workers=gov_workers, thread_name_prefix="rss-gov") as exe_gov,
+        ):
             futures = [
-                executor.submit(_ingest_one_source, source, timeout_seconds, window_start_iso)
-                for source in sources
+                exe_other.submit(_ingest_one_source, source, timeout_seconds, window_start_iso)
+                for source in other_sources
             ]
+            futures.extend(
+                exe_rsshub.submit(_ingest_one_source, source, timeout_seconds, window_start_iso)
+                for source in rsshub_sources
+            )
+            futures.extend(
+                exe_gov.submit(_ingest_one_source, source, timeout_seconds, window_start_iso)
+                for source in gov_sources
+            )
             for future in as_completed(futures):
                 source_results.append(future.result())
 
@@ -278,10 +323,10 @@ def ingest_rss_sources(
     fetched_source_count = sum(1 for result in source_results if result.get("status") == "success")
     new_item_count = sum(int(result.get("new_item_count") or 0) for result in source_results)
     updated_item_count = sum(int(result.get("updated_item_count") or 0) for result in source_results)
+    skipped_existing_item_count = sum(int(result.get("skipped_existing_item_count") or 0) for result in source_results)
     skipped_old_item_count = sum(int(result.get("skipped_old_item_count") or 0) for result in source_results)
 
     completed_at = utc_now_iso()
-    firestore_client.update_rss_source_ingest_results(source_results, completed_at)
     run = RssIngestRun(
         run_id=f"rss_ingest_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}",
         started_at=started_at,
@@ -298,8 +343,52 @@ def ingest_rss_sources(
         max_workers=max_workers,
         window_start=window_start_iso,
         skipped_old_item_count=skipped_old_item_count,
+        skipped_existing_item_count=skipped_existing_item_count,
         source_results=source_results,
     )
     firestore_client.create_rss_ingest_run(run)
 
-    return run.model_dump()
+    result = run.model_dump()
+    add_log_summary(result, _compose_ingest_log_summary(result))
+    return result
+
+
+def _compose_ingest_log_summary(result: dict[str, object]) -> list[str]:
+    source_results = result.get("source_results") if isinstance(result.get("source_results"), list) else []
+    errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+    slow_sources = sorted(
+        source_results,
+        key=lambda row: int(row.get("duration_ms") or 0) if isinstance(row, dict) else 0,
+        reverse=True,
+    )
+    slow_sample = sample_values(
+        [
+            f"{row.get('publisher') or row.get('source_id')} {seconds_text(row.get('duration_ms'))}"
+            for row in slow_sources
+            if isinstance(row, dict)
+        ]
+    )
+    error_sample = sample_from_dicts(errors, ("source_id", "error"))
+    lines = [
+        tagged(
+            "ok",
+            (
+                f"W2 RSS ingest 抓取 {result.get('fetched_source_count', 0)}/"
+                f"{result.get('source_count', 0)} 個 source，新增 {result.get('new_item_count', 0)} item，"
+                f"重複略過 {result.get('skipped_existing_item_count', 0)}，舊文略過 {result.get('skipped_old_item_count', 0)}。"
+            ),
+        ),
+    ]
+    if int(result.get("failed_source_count") or 0):
+        lines.append(
+            tagged(
+                "warn",
+                f"{result.get('failed_source_count')} 個 source 失敗：{error_sample or '詳見 errors'}。",
+            )
+        )
+    else:
+        lines.append(tagged("ok", "所有可抓取 source 皆成功。"))
+    if slow_sample:
+        lines.append(tagged("time", f"慢來源樣本：{slow_sample}。"))
+    lines.append(tagged("time", f"總耗時 {seconds_text(result.get('duration_ms'))}。"))
+    return lines

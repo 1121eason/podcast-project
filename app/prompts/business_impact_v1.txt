@@ -10,9 +10,7 @@
 訊號：
 標題：{title}
 摘要：{summary}
-重要度分數：{importance_score}
 影響類型：{impact_type}
-跨來源狀態：{cluster_status}
 代表 publisher：{representative_publisher}
 key_entities：{key_entities}
 regions：{regions}
