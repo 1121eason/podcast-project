@@ -310,8 +310,12 @@ def cosine_similarity_batch(query: list[float] | None, candidates: list[list[flo
             continue
         if len(vec) < dim:
             continue
+        try:
+            row = [float(x) for x in vec[:dim]]
+        except (TypeError, ValueError):
+            continue
         valid_index.append(idx)
-        matrix_rows.append(vec[:dim])
+        matrix_rows.append(row)
     if not matrix_rows:
         return [0.0] * len(candidates)
     q = np.asarray(query[:dim], dtype=np.float32)
