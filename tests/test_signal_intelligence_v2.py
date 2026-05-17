@@ -11,7 +11,12 @@ from app.services import (
     rss_story_thread_service,
     workflow_run_service,
 )
-from app.services.signal_v2_utils import decay_centroid, event_embedding_hash
+from app.services.signal_v2_utils import (
+    cosine_similarity,
+    cosine_similarity_batch,
+    decay_centroid,
+    event_embedding_hash,
+)
 
 
 def vec(cosine: float) -> list[float]:
@@ -139,6 +144,17 @@ class TestWorkflowRunService(unittest.TestCase):
 
 
 class TestSignalMatching(unittest.TestCase):
+    def test_malformed_query_embedding_does_not_crash_batch_cosine(self):
+        scores = cosine_similarity_batch(  # type: ignore[list-item]
+            [1.0, [0.0]],
+            [[1.0, 0.0], [0.0, 1.0]],
+        )
+        self.assertEqual(scores, [0.0, 0.0])
+
+    def test_malformed_single_cosine_returns_zero(self):
+        score = cosine_similarity([1.0, [0.0]], [1.0, 0.0])  # type: ignore[list-item]
+        self.assertEqual(score, 0.0)
+
     def test_high_score_auto_merges_and_updates_centroid(self):
         item = make_item(item_id="new_item", publisher="Reuters")
         signal = make_signal()
@@ -308,7 +324,13 @@ class TestSignalProcessorService(unittest.TestCase):
         self.assertEqual(fake_firestore.signals[0].signal_status, "provisional")
 
     def test_unchanged_embedding_hash_skips_embedding_call(self):
-        item = make_item()
+        item = make_item(
+            summary=(
+                "NVIDIA expands AI chip supply for cloud customers, citing strong demand "
+                "from hyperscalers and a sharp ramp-up across H100 / GB200 product lines. "
+                "Executives say next-gen Blackwell shipments will be prioritised."
+            ),
+        )
         item.event_embedding_hash = event_embedding_hash(
             rss_signal_processor_service.build_embedding_inputs(item)
         )
@@ -326,6 +348,35 @@ class TestSignalProcessorService(unittest.TestCase):
 
         self.assertEqual(result["embedding_skipped_cached_count"], 1)
         self.assertEqual(embedder.calls, 0)
+
+    def test_malformed_cached_embedding_is_reembedded(self):
+        item = make_item(
+            summary=(
+                "NVIDIA expands AI chip supply for cloud customers, citing strong demand "
+                "from hyperscalers and a sharp ramp-up across H100 / GB200 product lines. "
+                "Executives say next-gen Blackwell shipments will be prioritised."
+            ),
+        )
+        item.event_embedding_hash = event_embedding_hash(
+            rss_signal_processor_service.build_embedding_inputs(item)
+        )
+        item.event_embedding = [1.0, [0.0]]  # type: ignore[list-item]
+        fake_firestore = FakeSignalProcessorFirestore([item])
+        embedder = FakeEmbeddingClient()
+
+        with patch.object(rss_signal_processor_service, "firestore_client", fake_firestore):
+            result = rss_signal_processor_service.process_new_items(
+                since_hours=6,
+                limit_items=10,
+                article_extraction="off",
+                canonicalize="off",
+                embedding_client=embedder,
+            )
+
+        self.assertEqual(result["embedding_skipped_cached_count"], 0)
+        self.assertEqual(result["embedded_item_count"], 1)
+        self.assertEqual(embedder.calls, 1)
+        self.assertEqual(fake_firestore.signals[0].event_centroid, [1.0, 0.0])
 
     def test_process_metrics_report_auto_match_and_duplicate_prevention(self):
         item = make_item()

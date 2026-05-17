@@ -274,23 +274,51 @@ def extract_keywords(text: str, max_terms: int = 8) -> list[str]:
     return out
 
 
+def coerce_numeric_vector(vec: Iterable[object] | None) -> list[float] | None:
+    """Return a flat finite float vector, or None for malformed stored embeddings."""
+    if vec is None or isinstance(vec, (str, bytes)):
+        return None
+    out: list[float] = []
+    try:
+        values = list(vec)
+    except TypeError:
+        return None
+    if not values:
+        return None
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(number):
+            return None
+        out.append(number)
+    return out or None
+
+
+def is_numeric_vector(vec: Iterable[object] | None) -> bool:
+    return coerce_numeric_vector(vec) is not None
+
+
 def cosine_similarity(a: list[float] | None, b: list[float] | None) -> float:
-    if not a or not b:
+    va_list = coerce_numeric_vector(a)
+    vb_list = coerce_numeric_vector(b)
+    if not va_list or not vb_list:
         return 0.0
-    n = min(len(a), len(b))
+    n = min(len(va_list), len(vb_list))
     if n == 0:
         return 0.0
     if _NUMPY_AVAILABLE:
-        va = np.asarray(a[:n], dtype=np.float32)
-        vb = np.asarray(b[:n], dtype=np.float32)
+        va = np.asarray(va_list[:n], dtype=np.float32)
+        vb = np.asarray(vb_list[:n], dtype=np.float32)
         norm_a = float(np.linalg.norm(va))
         norm_b = float(np.linalg.norm(vb))
         if not norm_a or not norm_b:
             return 0.0
         return float(np.clip(np.dot(va, vb) / (norm_a * norm_b), -1.0, 1.0))
-    dot = sum(float(a[i]) * float(b[i]) for i in range(n))
-    norm_a = math.sqrt(sum(float(a[i]) ** 2 for i in range(n)))
-    norm_b = math.sqrt(sum(float(b[i]) ** 2 for i in range(n)))
+    dot = sum(va_list[i] * vb_list[i] for i in range(n))
+    norm_a = math.sqrt(sum(va_list[i] ** 2 for i in range(n)))
+    norm_b = math.sqrt(sum(vb_list[i] ** 2 for i in range(n)))
     if not norm_a or not norm_b:
         return 0.0
     return max(-1.0, min(1.0, dot / (norm_a * norm_b)))
@@ -298,27 +326,26 @@ def cosine_similarity(a: list[float] | None, b: list[float] | None) -> float:
 
 def cosine_similarity_batch(query: list[float] | None, candidates: list[list[float] | None]) -> list[float]:
     """Vectorized cosine of one query vs N candidate vectors. Returns 0.0 for missing entries."""
-    if not query or not candidates:
+    query_vec = coerce_numeric_vector(query)
+    if not query_vec or not candidates:
         return [0.0] * len(candidates) if candidates else []
     if not _NUMPY_AVAILABLE:
-        return [cosine_similarity(query, c) for c in candidates]
-    dim = len(query)
+        return [cosine_similarity(query_vec, c) for c in candidates]
+    dim = len(query_vec)
     valid_index = []
     matrix_rows = []
     for idx, vec in enumerate(candidates):
-        if not vec:
+        candidate_vec = coerce_numeric_vector(vec)
+        if not candidate_vec:
             continue
-        if len(vec) < dim:
+        if len(candidate_vec) < dim:
             continue
-        try:
-            row = [float(x) for x in vec[:dim]]
-        except (TypeError, ValueError):
-            continue
+        row = candidate_vec[:dim]
         valid_index.append(idx)
         matrix_rows.append(row)
     if not matrix_rows:
         return [0.0] * len(candidates)
-    q = np.asarray(query[:dim], dtype=np.float32)
+    q = np.asarray(query_vec[:dim], dtype=np.float32)
     q_norm = float(np.linalg.norm(q))
     if not q_norm:
         return [0.0] * len(candidates)
@@ -334,21 +361,24 @@ def cosine_similarity_batch(query: list[float] | None, candidates: list[list[flo
 
 
 def normalize_vector(vec: list[float] | None) -> list[float] | None:
-    if not vec:
+    clean = coerce_numeric_vector(vec)
+    if not clean:
         return None
-    norm = math.sqrt(sum(float(v) ** 2 for v in vec))
+    norm = math.sqrt(sum(v ** 2 for v in clean))
     if not norm:
-        return list(vec)
-    return [float(v) / norm for v in vec]
+        return clean
+    return [v / norm for v in clean]
 
 
 def decay_centroid(old: list[float] | None, new: list[float] | None, decay: float) -> list[float] | None:
-    if not old:
-        return normalize_vector(new)
-    if not new:
-        return normalize_vector(old)
-    n = min(len(old), len(new))
-    mixed = [float(old[i]) * decay + float(new[i]) * (1.0 - decay) for i in range(n)]
+    old_vec = coerce_numeric_vector(old)
+    new_vec = coerce_numeric_vector(new)
+    if not old_vec:
+        return normalize_vector(new_vec)
+    if not new_vec:
+        return normalize_vector(old_vec)
+    n = min(len(old_vec), len(new_vec))
+    mixed = [old_vec[i] * decay + new_vec[i] * (1.0 - decay) for i in range(n)]
     return normalize_vector(mixed)
 
 

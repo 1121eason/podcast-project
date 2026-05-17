@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.api.model_routing_payloads import ModelRouteOverride, dump_model_overrides
 from app.clients.firestore_client import firestore_client
+from app.core.logging import logger
 from app.core.security import require_admin_token
 from app.services.rss_clustering_service import run_clustering
 from app.services.rss_embedding_service import embed_pending_items
@@ -116,6 +117,8 @@ def process_new_items_endpoint(
             model_overrides=dump_model_overrides(request.model_overrides),
         )
     except Exception as exc:
+        import traceback
+        logger.error("process_new_items failed:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(exc))
 
 

@@ -24,7 +24,14 @@ from app.services.model_routing_service import (
 from app.services.rss_article_extraction_service import extract_article_lead
 from app.services.rss_item_signals_service import extract_item_signals, item_signals_hash
 from app.services.rss_signal_matching_service import is_too_thin_for_new_signal, match_item_to_signal
-from app.services.signal_v2_utils import compact_text, event_embedding_hash, stable_hash, utc_now_iso
+from app.services.signal_v2_utils import (
+    coerce_numeric_vector,
+    compact_text,
+    event_embedding_hash,
+    is_numeric_vector,
+    stable_hash,
+    utc_now_iso,
+)
 from app.services.workflow_run_service import complete_workflow_run, fail_workflow_run, start_workflow_run
 
 logger = logging.getLogger(__name__)
@@ -156,7 +163,8 @@ def _process_new_items_inner(
 
         embedding_inputs = build_embedding_inputs(item)
         embedding_hash = event_embedding_hash(embedding_inputs)
-        if item.event_embedding_hash == embedding_hash and item.event_embedding:
+        if item.event_embedding_hash == embedding_hash and _has_valid_cached_embeddings(item):
+            _normalize_item_embeddings(item)
             embedding_skipped_cached_count += 1
         elif embed:
             vectors, chars, model = _embed_inputs(embedding_inputs, embedding_client)
@@ -223,7 +231,7 @@ def _process_new_items_inner(
         active_signals = firestore_client.list_active_signals_for_matching(active_since, limit=1000)
         signals_to_write: dict[str, RssSignal] = {}
         for item in processed_items:
-            if not item.event_embedding:
+            if not is_numeric_vector(item.event_embedding):
                 continue
             candidate_signals = _prune_active_signals(item, active_signals)
             outcome, signal, meta = match_item_to_signal(
@@ -409,11 +417,31 @@ def _embed_inputs(
         logger.warning("Multi-vector embedding had failed indices: %s", failed)
     out = {}
     for key, vector in zip(keys, vectors):
-        out[key] = vector or []
+        out[key] = coerce_numeric_vector(vector) or []
     for key in keys:
         out.setdefault(key, [])
     model = getattr(client, "model_name", settings.EMBEDDING_MODEL)
     return out, total_chars, model
+
+
+def _has_valid_cached_embeddings(item: RssItem) -> bool:
+    if not is_numeric_vector(item.event_embedding):
+        return False
+    return all(
+        _is_empty_or_numeric_vector(vec)
+        for vec in (item.entity_embedding, item.impact_embedding, item.context_embedding)
+    )
+
+
+def _is_empty_or_numeric_vector(vec: list[float] | None) -> bool:
+    return not vec or is_numeric_vector(vec)
+
+
+def _normalize_item_embeddings(item: RssItem) -> None:
+    item.event_embedding = coerce_numeric_vector(item.event_embedding)
+    item.entity_embedding = coerce_numeric_vector(item.entity_embedding) or []
+    item.impact_embedding = coerce_numeric_vector(item.impact_embedding) or []
+    item.context_embedding = coerce_numeric_vector(item.context_embedding) or []
 
 
 def _prune_active_signals(
