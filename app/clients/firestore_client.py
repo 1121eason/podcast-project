@@ -18,6 +18,14 @@ from typing import Optional
 
 from app.core.logging import logger
 
+SINGLE_EMBEDDING_BATCH_WRITE_LIMIT = 25
+# W4 stores four 768-dim arrays on each rss_item/rss_signal. Firestore counts
+# index mutations toward the request size, so even 20 docs can exceed the
+# transaction limit while vector fields are still indexed. Commit these one at a
+# time; write cost is unchanged and this avoids batch-size failures.
+MULTI_VECTOR_BATCH_WRITE_LIMIT = 1
+
+
 class FirestoreClient:
     def __init__(self):
         try:
@@ -271,7 +279,6 @@ class FirestoreClient:
         batch = self.db.batch()
         operation_count = 0
         written = 0
-        embedding_batch_limit = 100
         for item_id, (vector, model, ts) in embeddings.items():
             batch.update(
                 collection.document(item_id),
@@ -283,7 +290,7 @@ class FirestoreClient:
             )
             operation_count += 1
             written += 1
-            if operation_count >= embedding_batch_limit:
+            if operation_count >= SINGLE_EMBEDDING_BATCH_WRITE_LIMIT:
                 batch.commit()
                 batch = self.db.batch()
                 operation_count = 0
@@ -329,7 +336,7 @@ class FirestoreClient:
         for item_id, update_data in item_updates.items():
             batch.update(collection.document(item_id), update_data)
             operation_count += 1
-            if operation_count >= 50:
+            if operation_count >= MULTI_VECTOR_BATCH_WRITE_LIMIT:
                 batch.commit()
                 batch = self.db.batch()
                 operation_count = 0
@@ -371,7 +378,7 @@ class FirestoreClient:
         for signal in signals:
             batch.set(collection.document(signal.signal_id), signal.model_dump())
             operation_count += 1
-            if operation_count >= 50:
+            if operation_count >= MULTI_VECTOR_BATCH_WRITE_LIMIT:
                 batch.commit()
                 batch = self.db.batch()
                 operation_count = 0

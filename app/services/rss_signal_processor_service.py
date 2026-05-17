@@ -122,6 +122,7 @@ def _process_new_items_inner(
     embedding_skipped_cached_count = 0
     embedded_item_count = 0
     total_embedding_chars = 0
+    shared_embedding_client = embedding_client
 
     for item in items:
         update: dict = {}
@@ -167,7 +168,9 @@ def _process_new_items_inner(
             _normalize_item_embeddings(item)
             embedding_skipped_cached_count += 1
         elif embed:
-            vectors, chars, model = _embed_inputs(embedding_inputs, embedding_client)
+            if shared_embedding_client is None:
+                shared_embedding_client = EmbeddingClient()
+            vectors, chars, model = _embed_inputs(embedding_inputs, shared_embedding_client)
             item.event_embedding = vectors["event"]
             item.entity_embedding = vectors["entity"]
             item.impact_embedding = vectors["impact"]

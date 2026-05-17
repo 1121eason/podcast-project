@@ -2,6 +2,7 @@ import logging
 import re
 from html import unescape
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import httpx
 
@@ -18,6 +19,12 @@ ARTICLE_LEAD_CHAR_LIMIT = 1600
 RSS_SUFFICIENT_CHARS = 400
 # X2: scraped lead >= this many chars → status="success", else "thin"
 SCRAPE_USEFUL_CHARS = 500
+BLOCKED_FINAL_HOSTS = {"unblock.federalregister.gov"}
+BLOCK_PAGE_PATTERNS = (
+    "verify you are human",
+    "enable javascript and cookies",
+    "access to this page has been denied",
+)
 
 
 class _TextExtractor(HTMLParser):
@@ -62,6 +69,8 @@ def extract_article_lead(item: RssItem, timeout_seconds: int = 10) -> dict[str, 
         headers = {"User-Agent": "InformativeAI-SignalProcessor/1.0"}
         response = httpx.get(item.url, headers=headers, timeout=timeout_seconds, follow_redirects=True)
         response.raise_for_status()
+        if _is_block_page_response(response):
+            raise ValueError(f"blocked article fetch: {response.url}")
         content_type = response.headers.get("content-type", "")
         if "html" not in content_type and "text" not in content_type:
             raise ValueError(f"unsupported content-type: {content_type}")
@@ -93,3 +102,11 @@ def _clean_html_to_lead(html: str) -> str:
     text = " ".join(parser.parts)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:ARTICLE_LEAD_CHAR_LIMIT]
+
+
+def _is_block_page_response(response: httpx.Response) -> bool:
+    host = urlparse(str(response.url)).netloc.lower()
+    if host in BLOCKED_FINAL_HOSTS:
+        return True
+    snippet = (response.text or "")[:4000].lower()
+    return any(pattern in snippet for pattern in BLOCK_PAGE_PATTERNS)
