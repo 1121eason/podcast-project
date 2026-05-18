@@ -161,7 +161,7 @@
   - `BRIEFING_MODEL_GEMINI` = `gemini-2.5-pro`，`PODCAST_SCRIPT_MODEL_GEMINI` = `gemini-2.5-pro`，`MATCH_ADJUDICATION_MODEL_GEMINI` = `gemini-2.5-pro`。
   - Importance code-level guard rails：`MARKET_WRAP_CAP=45`、`SINGLE_CORP_CAP=65`、`PUBLIC_HEALTH_CAP=65`、`ANALYSIS_CAP`（值待確認）。
   - Briefing 預設：`DEFAULT_SCORE_THRESHOLD=60`、`DEFAULT_MAX_SECTIONS=10`、`DEFAULT_MAX_SIGNALS_INPUT=80`。
-  - TTS：`PODCAST_TTS_TIMEOUT_SECONDS=1800`、`PODCAST_TTS_LOCATION=global`、聲線 `cmn-TW-Chirp3-HD-Charon`。
+  - TTS：`PODCAST_TTS_TIMEOUT_SECONDS=1800`、`PODCAST_TTS_LOCATION=global`、聲線現行預設 `cmn-TW-Wavenet-B`。
 - review 重點清單（從文件 §7 整理，給未來實施參考）：
   - 🔴 強建議改（風險低、收益明確）：
     1. `IMPACT_REASONING_EFFORT: high → medium` 或 `minimal`（純 list 抽取不需深推理）。
@@ -1350,3 +1350,16 @@
   - `docs/n8n_setup.md` 的 W8 Normalize Success 建議把 `error_message` 映射為 `r.google_doc_error || ""`。
 - 驗證：
   - `.venv/bin/python -m unittest tests.test_rss_briefing_service tests.test_briefings_api` → **20/20 pass**。
+
+## 2026/05/19 08:10 - Codex 更新
+- 更新者：Codex
+- 進度：修復 W9 第二層 TTS voice failure。
+- 問題定位：
+  - `DAILY_2026_05_19` 重跑後已越過先前的 LINEAR16 encoding 問題，新的失敗點是 Google TTS 回傳 `400 Voice 'cmn-TW-Chirp3-HD-Charon' does not exist`。
+  - 官方 voice list 中 `cmn-TW` 有效聲線為 `cmn-TW-Standard-A/B/C` 與 `cmn-TW-Wavenet-A/B/C`；`Chirp3-HD-Charon` 屬於 `cmn-CN`，不是 `cmn-TW`。
+- 修法：
+  - `PODCAST_TTS_VOICE` default 改為 `cmn-TW-Wavenet-B`。
+  - W9 audio 文件同步更新為 `LINEAR16` + `.wav` + `cmn-TW-Wavenet-B`。
+- 後續：
+  - Zeabur 若有顯式設定舊 env `PODCAST_TTS_VOICE=cmn-TW-Chirp3-HD-Charon`，需改為 `cmn-TW-Wavenet-B` 或移除該 env 讓 code default 生效。
+  - Redeploy 後用同一個 `DAILY_2026_05_19` bucket 重跑 W9，應會 reuse script 並只重試 audio/package。

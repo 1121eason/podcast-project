@@ -1473,7 +1473,9 @@ Before switching to formal daily payload, refresh the Google Sheets node fields 
 
 - First content day reached the audio stage and failed with Google Long Audio Synthesis `400 Audio encoding MP3 is currently unsupported... only LINEAR16 audio encodings are supported`.
 - Backend fix: podcast audio now uses `texttospeech.AudioEncoding.LINEAR16` and writes `.wav` objects, not `.mp3`.
-- No n8n payload change is required. After deploy, re-run W9 with a fresh manual bucket or wait for the next daily bucket.
+- Second retry then failed at voice validation: `cmn-TW-Chirp3-HD-Charon` does not exist for `cmn-TW`.
+- Backend default voice is now `cmn-TW-Wavenet-B`; if Zeabur has explicit `PODCAST_TTS_VOICE`, update it there too.
+- No n8n payload change is required. After deploy, re-run W9 with the same daily bucket to reuse the script and retry audio/package.
 
 ## Failure / Error Branch
 

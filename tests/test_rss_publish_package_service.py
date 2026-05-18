@@ -56,8 +56,8 @@ def make_episode() -> RssPodcastEpisode:
         script_id="script_1",
         briefing_date="2026-05-09",
         generated_at="2026-05-09T00:00:00Z",
-        audio_url="gs://bucket/podcasts/2026-05-09/script_1.mp3",
-        audio_gcs_uri="gs://bucket/podcasts/2026-05-09/script_1.mp3",
+        audio_url="gs://bucket/podcasts/2026-05-09/script_1.wav",
+        audio_gcs_uri="gs://bucket/podcasts/2026-05-09/script_1.wav",
     )
 
 
@@ -88,7 +88,7 @@ class PublishPackageServiceTest(unittest.TestCase):
             result["source_urls"],
             ["https://example.com/a", "https://example.com/b", "https://example.com/c"],
         )
-        self.assertEqual(fake_firestore.package.audio_gcs_uri, "gs://bucket/podcasts/2026-05-09/script_1.mp3")
+        self.assertEqual(fake_firestore.package.audio_gcs_uri, "gs://bucket/podcasts/2026-05-09/script_1.wav")
 
     def test_create_publish_package_returns_existing_unless_forced(self):
         existing = rss_publish_package_service.RssPublishPackage(

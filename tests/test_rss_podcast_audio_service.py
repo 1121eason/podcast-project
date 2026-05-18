@@ -51,7 +51,7 @@ class PodcastAudioServiceTest(unittest.TestCase):
              patch.object(rss_podcast_audio_service.settings, "GCP_PROJECT_ID", "project-id"), \
              patch.object(rss_podcast_audio_service.settings, "PODCAST_TTS_LOCATION", "global"), \
              patch.object(rss_podcast_audio_service.settings, "PODCAST_TTS_LANGUAGE_CODE", "cmn-TW"), \
-             patch.object(rss_podcast_audio_service.settings, "PODCAST_TTS_VOICE", "cmn-TW-Chirp3-HD-Charon"), \
+             patch.object(rss_podcast_audio_service.settings, "PODCAST_TTS_VOICE", "cmn-TW-Wavenet-B"), \
              patch.object(rss_podcast_audio_service, "_get_gcs_object_size", return_value=12345), \
              patch.object(rss_podcast_audio_service.texttospeech, "TextToSpeechLongAudioSynthesizeClient", return_value=client):
             result = rss_podcast_audio_service.synthesize_podcast_audio(make_script())
@@ -59,7 +59,7 @@ class PodcastAudioServiceTest(unittest.TestCase):
         request = client.synthesize_long_audio.call_args.kwargs["request"]
         self.assertEqual(request["parent"], "projects/project-id/locations/global")
         self.assertEqual(request["voice"]["language_code"], "cmn-TW")
-        self.assertEqual(request["voice"]["name"], "cmn-TW-Chirp3-HD-Charon")
+        self.assertEqual(request["voice"]["name"], "cmn-TW-Wavenet-B")
         self.assertEqual(request["audio_config"]["audio_encoding"], rss_podcast_audio_service.texttospeech.AudioEncoding.LINEAR16)
         self.assertEqual(
             request["output_gcs_uri"],

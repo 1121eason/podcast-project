@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     DAILY_CONSOLIDATION_MODEL_GEMINI: str = "gemini-2.5-pro"
 
     GCS_AUDIO_BUCKET: str = ""
-    PODCAST_TTS_VOICE: str = "cmn-TW-Chirp3-HD-Charon"
+    PODCAST_TTS_VOICE: str = "cmn-TW-Wavenet-B"
     PODCAST_TTS_LANGUAGE_CODE: str = "cmn-TW"
     PODCAST_TTS_LOCATION: str = "global"
     PODCAST_TTS_TIMEOUT_SECONDS: int = 1800
