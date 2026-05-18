@@ -166,6 +166,7 @@ class RssBriefing(BaseModel):
 
     google_doc_id: Optional[str] = None
     google_doc_url: Optional[str] = None
+    google_doc_error: Optional[str] = None
 
     model: str = ""
     input_tokens: int = 0

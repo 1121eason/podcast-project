@@ -1124,7 +1124,7 @@ return [{
     primary_count_2: Number(r.briefing_retry_count || 0),
     workflow_run_id: r.workflow_run_id || "",
     log_summary: (r.log_summary || []).join("\n"),
-    error_message: "",
+    error_message: r.google_doc_error || "",
     briefing_id: r.briefing_id || "",
     briefing_date: r.briefing_date || "",
     score_threshold: Number(r.score_threshold || 0),

@@ -111,7 +111,7 @@ def write_briefing_to_doc(
     categories: list[BriefingCategory],
     aggregated_watch_points: list[str],
     signal_pool_health: dict,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
     title = f"Signal Brief Daily — {briefing_date}"
     text = _format_briefing_text(
         briefing_date,
@@ -123,16 +123,18 @@ def write_briefing_to_doc(
     )
 
     if not docs_client.service:
+        error = "Docs API service not initialized"
         logger.warning("Docs client not ready, skipping Google Doc write")
-        return None, None
+        return None, None, error
 
     try:
         doc = docs_client.create_document(title)
         doc_id = doc.get("documentId")
         if not doc_id:
-            return None, None
+            return None, None, "Docs API returned no documentId"
         docs_client.insert_text(doc_id, text)
-        return doc_id, f"https://docs.google.com/document/d/{doc_id}/edit"
+        return doc_id, f"https://docs.google.com/document/d/{doc_id}/edit", None
     except Exception as exc:
+        error = str(exc)
         logger.error("Failed to write briefing to Google Doc: %s", exc)
-        return None, None
+        return None, None, error

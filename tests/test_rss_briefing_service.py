@@ -425,6 +425,24 @@ class TestRetryCountObservability(unittest.TestCase):
         self.assertEqual(result["log_summary_version"], 1)
         self.assertTrue(any("W8 Briefing" in line for line in result["log_summary"]))
 
+    def test_google_doc_write_error_is_visible(self):
+        signals = [make_signal("s1", 85, "Test", "https://example.com/1")]
+        fake_fc = FakeFirestoreClient(signals)
+        fake_g = FakeGeminiClient(self._valid_payload())
+
+        with patch.object(rss_briefing_service, "firestore_client", fake_fc), \
+             patch.object(rss_briefing_service, "gemini_client", fake_g), \
+             patch.object(rss_briefing_service.openai_client, "client", None), \
+             patch("app.services.briefing_doc_writer.write_briefing_to_doc", return_value=(None, None, "Docs API service not initialized")):
+            result = rss_briefing_service.generate_daily_briefing(
+                briefing_date="2026-05-15", write_google_doc=True
+            )
+
+        self.assertEqual(result["google_doc_error"], "Docs API service not initialized")
+        self.assertIsNone(result["google_doc_url"])
+        self.assertEqual(fake_fc.briefing_written.google_doc_error, "Docs API service not initialized")
+        self.assertTrue(any("Google Doc 未寫" in line for line in result["log_summary"]))
+
     def test_retry_count_one_when_first_call_fails(self):
         signals = [make_signal("s1", 85, "Test", "https://example.com/1")]
         fake_fc = FakeFirestoreClient(signals)

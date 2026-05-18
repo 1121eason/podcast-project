@@ -568,10 +568,11 @@ def generate_daily_briefing(
 
         google_doc_id = None
         google_doc_url = None
+        google_doc_error = None
         if write_google_doc:
             try:
                 from app.services.briefing_doc_writer import write_briefing_to_doc
-                google_doc_id, google_doc_url = write_briefing_to_doc(
+                google_doc_id, google_doc_url, google_doc_error = write_briefing_to_doc(
                     briefing_date=briefing_date,
                     overview=validated["overview"],
                     top_changes=top_changes,
@@ -580,6 +581,7 @@ def generate_daily_briefing(
                     signal_pool_health=validated["signal_pool_health"],
                 )
             except Exception as exc:
+                google_doc_error = str(exc)
                 logger.warning("Google Doc write skipped: %s", exc)
 
         briefing = RssBriefing(
@@ -597,6 +599,7 @@ def generate_daily_briefing(
             signal_pool_health=validated["signal_pool_health"],
             google_doc_id=google_doc_id,
             google_doc_url=google_doc_url,
+            google_doc_error=google_doc_error,
             model=model_used,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -622,7 +625,7 @@ def _compose_briefing_log_summary(result: dict[str, object]) -> list[str]:
     categories = result.get("categories") if isinstance(result.get("categories"), list) else []
     section_count = sum(len(c.get("sections") or []) for c in categories if isinstance(c, dict))
     top_changes = result.get("top_changes") if isinstance(result.get("top_changes"), list) else []
-    doc_status = "已寫 Google Doc" if result.get("google_doc_url") else "未寫 Google Doc"
+    google_doc_error = str(result.get("google_doc_error") or "")
     retry_count = int(result.get("briefing_retry_count") or 0)
     lines = [
         tagged(
@@ -639,7 +642,12 @@ def _compose_briefing_log_summary(result: dict[str, object]) -> list[str]:
         lines.append(tagged("warn", f"briefing validation retry {retry_count} 次，請抽查輸出格式是否穩定。"))
     else:
         lines.append(tagged("ok", "briefing validation 一次通過。"))
-    lines.append(tagged("ok", doc_status + "。"))
+    if result.get("google_doc_url"):
+        lines.append(tagged("ok", "已寫 Google Doc。"))
+    elif google_doc_error:
+        lines.append(tagged("warn", f"Google Doc 未寫：{google_doc_error[:220]}。"))
+    else:
+        lines.append(tagged("ok", "未寫 Google Doc。"))
     lines.append(
         tagged(
             "cost",

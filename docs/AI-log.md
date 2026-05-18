@@ -1335,3 +1335,18 @@
   - `.venv/bin/python -m unittest tests.test_rss_podcast_audio_service tests.test_rss_publish_package_service tests.test_rss_podcast_script_service tests.test_podcasts_api` → **22/22 pass**。
 - 後續：
   - deploy 後用 fresh manual W9 bucket 重跑 full path，或等下一個 daily bucket；不需要改 n8n payload。
+
+## 2026/05/19 07:55 - Codex 更新
+- 更新者：Codex
+- 進度：修復 W8 Google Doc failure 靜默問題，讓下次 production 能直接看到未寫 Doc 的真因。
+- 問題定位：
+  - `DAILY_2026_05_19` 的 W8 是 fresh run（`skipped_duplicate=false`），已成功產生 briefing：`selected_signal_count=32`、`google_doc_id=None`、`google_doc_url=None`。
+  - 根因不是 n8n payload；`write_google_doc=true` 與 HTTP body mapping 皆正確。
+  - 後端 `write_briefing_to_doc()` 失敗時原本直接 return `(None, None)`，`generate_daily_briefing()` 也會 catch exception 後繼續 success，導致 Sheet 只看到「未寫 Google Doc」，看不到 credential / permission / Docs API 真因。
+- 修法：
+  - `RssBriefing` 新增 `google_doc_error` 欄位。
+  - `write_briefing_to_doc()` 改回傳 `(google_doc_id, google_doc_url, google_doc_error)`；Docs client 未初始化、缺 `documentId`、Docs API exception 都會帶出錯誤字串。
+  - W8 result / Firestore summary 會保存 `google_doc_error`；`log_summary` 若未寫 Doc 且有 error，會輸出 `[warn] Google Doc 未寫：...`。
+  - `docs/n8n_setup.md` 的 W8 Normalize Success 建議把 `error_message` 映射為 `r.google_doc_error || ""`。
+- 驗證：
+  - `.venv/bin/python -m unittest tests.test_rss_briefing_service tests.test_briefings_api` → **20/20 pass**。
