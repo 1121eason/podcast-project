@@ -995,3 +995,58 @@
   - 在 Zeabur 設 `MODEL_ROUTING_RUNTIME_ENABLED=true` 後，用 `GET /admin/model-routing` 確認 `runtime_config.enabled=true`。
   - n8n A/B test 建議先從 W8 / W9 開始：同一天用不同 `run_bucket` 跑 A/B，Sheet 記錄 `model_routing`、`cost_usd`、retry_count、人工品質分數。
   - 下一輪可以加一張 `Model_AB_Log` Sheet schema，專門記錄 A/B 組別、模型、成本、人工評分與勝出原因。
+
+## 2026/05/18 10:20 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W4 n8n production bring-up 與穩定化。這輪主要處理三個 production 現象：`inhomogeneous shape` vector crash、Firestore `Transaction too big`、以及 n8n 成功/失敗 log 分支混寫。
+- 問題定位：
+  - **P0 — malformed vector 導致 W4 500**：n8n W4 一開始回 `setting an array element with a sequence... shape was (37,) + inhomogeneous part`。根因是 `rss_items` 或 `rss_signals` 內某些 embedding / centroid 欄位不是乾淨的一維 `list[float]`，`cosine_similarity_batch()` 建 numpy matrix 時炸掉。已在上一個 commit 修：`coerce_numeric_vector()` / `is_numeric_vector()`，batch cosine 遇壞 vector 回 0 similarity，W4 cached embedding 也會驗證，不再沿用壞 vector。
+  - **P0 — Firestore transaction too big**：`limit_items=20` 仍回 `400 Transaction too big. Decrease transaction size.`。根因是 W4 每筆 item 會寫 4 組 768-dim vector（event/entity/impact/context embedding），`rss_items` v2 update 或 `rss_signals` upsert 以 50 筆一 batch commit 時，Firestore request size / index mutation 過大。修法：`MULTI_VECTOR_BATCH_WRITE_LIMIT = 1`，multi-vector docs 一筆一 commit；write 數量與成本不變，只增加 RPC 次數。單舊 embedding batch 調為 25。
+  - **P1 — W4 每筆重建 embedding client**：Zeabur log 顯示每處理一筆 item 都 `Initialized Gemini Embedding Client`。修法：`rss_signal_processor_service._process_new_items_inner()` lazy 建立一次 `shared_embedding_client`，同一個 W4 run 共用。
+  - **P1 — Federal Register unblock 頁污染 article_lead**：Zeabur log 顯示 federalregister.gov 302 到 `unblock.federalregister.gov` 並回 200。原邏輯可能把 anti-bot/unblock 頁當文章 lead 存入。修法：`rss_article_extraction_service._is_block_page_response()` 偵測 final host / 常見 block phrase，標成 `failed` 並保留原 `article_lead` / RSS summary。
+  - **P1 — n8n log 雙寫 success + failed**：n8n HTTP 失敗時仍走 success append，Sheet 出現 `success/0/空 run_bucket` 加上一行 failed。修法在 n8n：HTTP Request 開 `Continue On Fail=true`，後接 IF，以 `log_summary_version == 1` 判斷 success；true / false 各自 normalize 後再 append，同一次只寫一行。
+- Commit / push：
+  - `70b86af Stabilize W4 vector writes` 已 push 到 `rss-status-200-fetchable`。
+  - 主要檔案：`app/clients/firestore_client.py`、`app/services/rss_signal_processor_service.py`、`app/services/rss_article_extraction_service.py`。
+  - 新增 tests：`tests/test_firestore_client_batching.py`、`tests/test_rss_article_extraction_service.py`。
+- n8n W4 最終路線：
+  - Endpoint 必須是 `POST /signals/process-new-items`，不是 legacy `/signals/cluster`。
+  - `Build W4 Payload` 正式排程使用 UTC 30 分鐘 floor bucket，例如 `2026_05_18T0000Z`。手動測試才用 `manual_w4_selective_50_<timestamp>`。
+  - HTTP body 透過 `{{ JSON.stringify($json.body) }}` 傳入；不要在 raw JSON 字串內寫 `"run_bucket": "={{ $json.run_bucket }}"`，那會被當 literal，生成 `signal_process______json_run_bucket___`。
+  - IF 建議條件：`{{ $json.log_summary_version }}` is equal to `{{ 1 }}`。
+  - Sheet 欄位以 `status` 為準；`fin` 可省略，若已有欄位則 success/skipped = `Y`，failed = `N`。
+- 目前 W4 production 建議參數：
+  ```json
+  {
+    "since_hours": 24,
+    "limit_items": 50,
+    "max_workers": 5,
+    "article_extraction": "selective",
+    "canonicalize": "selective",
+    "embed": true,
+    "match": true,
+    "run_bucket": "UTC_30_MIN_FLOOR"
+  }
+  ```
+  - `limit_items=50` 是目前日常建議；`250` 暫時只作手動 backlog catch-up，不作剛上線的排程預設。
+  - `article_extraction=selective` 是這輪優化目的，應保持開啟；`off` 只用於故障定位。
+- Production / n8n 驗證結果：
+  - Manual smoke `limit_items=3`：processed 3/3，wrote 3 signals，cost `$0.000042`，證明 API / auth / run_bucket 正常。
+  - W4 `limit_items=50`, `article_extraction=off`：processed 50/50，embedded 50，wrote 19 signals，`thin_dropped_count=25`，duration `199s`，cost `$0.001488`。
+  - W4 `limit_items=50`, `article_extraction=selective`：processed 22/22，`article_extracted_count=11`，wrote 12 signals，`thin_dropped_count=6`，duration `165.7s`，cost `$0.007473`。Selective 有效降低 thin drop 比例（約 50% → 27%），但會讓更多 item 進 review band，W4 adjudication 成本略升，仍屬可接受。
+- 設計取捨：
+  - **multi-vector 一筆一 commit** 是止血策略：Firestore write 數不變，費用不因 batch 拆小而上升；缺點是 RPC 次數增加、W4 duration 稍長。長期應在 Firestore 關掉 vector 欄位 single-field index 後再把 batch 拉回 10/25。
+  - **run_bucket idempotency 不看 request_hash 決定是否重跑**：同 bucket 即使 body 從 `off` 改 `selective`，也會 `skipped_duplicate=true` 回上次結果。這是刻意保護昂貴步驟；測不同 body 必須換 manual bucket。
+  - **W4 先穩定 24h 再進 W5/W6**：先看 `failed=0`、`duration_ms` 多數 < 300000、`thin_dropped_count / processed_item_count < 40%`、單次 `cost_usd` 大多 < `$0.02`。
+- 後續待辦：
+  - Firestore Console 建議加 single-field index exemption：
+    - `rss_items.embedding`
+    - `rss_items.event_embedding`
+    - `rss_items.entity_embedding`
+    - `rss_items.impact_embedding`
+    - `rss_items.context_embedding`
+    - `rss_signals.event_centroid`
+    - `rss_signals.entity_centroid`
+    - `rss_signals.impact_centroid`
+    - `rss_signals.context_centroid`
+  - W4 穩定 24h 後，再打開 W5 Verify/Judge；不要同時啟動多個 W4 schedule 搶同一批 pending item。
