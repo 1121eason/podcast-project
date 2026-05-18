@@ -1357,7 +1357,7 @@ return [{
     primary_count_2: Number(script.script_retry_count || 0),
     workflow_run_id: r.workflow_run_id || "",
     log_summary: (r.log_summary || []).join("\n"),
-    error_message: "",
+    error_message: script.google_doc_error || "",
     run_id: run.run_id || r.run_id || "",
     briefing_id: script.briefing_id || "",
     briefing_date: script.briefing_date || run.briefing_date || "",

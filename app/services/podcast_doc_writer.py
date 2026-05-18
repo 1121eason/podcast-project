@@ -84,7 +84,7 @@ def write_podcast_script_to_doc(
     word_count: int,
     duration_estimate: float,
     validation_warnings: list[str] | None = None,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
     title = episode_title or f"Informative AI Podcast — {briefing_date}"
     text = _format_podcast_text(
         briefing_date,
@@ -99,16 +99,18 @@ def write_podcast_script_to_doc(
     )
 
     if not docs_client.service:
+        error = "Docs API service not initialized"
         logger.warning("Docs client not ready, skipping podcast Google Doc write")
-        return None, None
+        return None, None, error
 
     try:
         doc = docs_client.create_document(title)
         doc_id = doc.get("documentId")
         if not doc_id:
-            return None, None
+            return None, None, "Docs API returned no documentId"
         docs_client.insert_text(doc_id, text)
-        return doc_id, f"https://docs.google.com/document/d/{doc_id}/edit"
+        return doc_id, f"https://docs.google.com/document/d/{doc_id}/edit", None
     except Exception as exc:
+        error = str(exc)
         logger.error("Failed to write podcast script to Google Doc: %s", exc)
-        return None, None
+        return None, None, error

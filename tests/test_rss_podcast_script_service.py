@@ -445,6 +445,31 @@ class TestRetryOnValidationFailure(unittest.TestCase):
         self.assertTrue(any("W9 Script" in line for line in result["log_summary"]))
         self.assertEqual(len(fake.written_scripts), 1)
 
+    def test_google_doc_write_error_is_visible(self):
+        briefing = make_threaded_briefing()
+        good = self._valid_payload()
+
+        class GoodGemini:
+            def generate_json(self, prompt, model="gemini-2.5-pro"):
+                return good, 1500, 400
+
+        fake = FakeFirestore(briefings=[briefing])
+        with patch.object(rss_podcast_script_service, "firestore_client", fake), \
+             patch.object(rss_podcast_script_service, "gemini_client", GoodGemini()), \
+             patch.object(rss_podcast_script_service.openai_client, "client", None), \
+             patch(
+                 "app.services.podcast_doc_writer.write_podcast_script_to_doc",
+                 return_value=(None, None, "Docs API service not initialized"),
+             ):
+            result = rss_podcast_script_service.generate_daily_podcast_script(
+                write_google_doc=True
+            )
+
+        self.assertEqual(result["google_doc_error"], "Docs API service not initialized")
+        self.assertIsNone(result["google_doc_url"])
+        self.assertEqual(fake.written_scripts[0].google_doc_error, "Docs API service not initialized")
+        self.assertTrue(any("未寫 podcast Google Doc" in line for line in result["log_summary"]))
+
     def test_two_failures_raises(self):
         briefing = make_threaded_briefing()
 

@@ -1363,3 +1363,17 @@
 - 後續：
   - Zeabur 若有顯式設定舊 env `PODCAST_TTS_VOICE=cmn-TW-Chirp3-HD-Charon`，需改為 `cmn-TW-Wavenet-B` 或移除該 env 讓 code default 生效。
   - Redeploy 後用同一個 `DAILY_2026_05_19` bucket 重跑 W9，應會 reuse script 並只重試 audio/package。
+
+## 2026/05/19 08:35 - Codex 更新
+- 更新者：Codex
+- 進度：W9 full path 已成功，補齊 podcast Google Doc failure observability。
+- Production 結果：
+  - `DAILY_2026_05_19` W9 成功：script `6418` 字、audio `1200s`、GCS `.wav`、`tts_voice=cmn-TW-Wavenet-B`、package 完成、成本 `$0.16997`。
+  - 仍需觀察：`script_google_doc_url` 為空，主流程不受影響，但文件備份未寫。
+- 修法：
+  - `RssPodcastScript` 新增 `google_doc_error` 欄位。
+  - `write_podcast_script_to_doc()` 改回傳 `(google_doc_id, google_doc_url, google_doc_error)`，與 W8 briefing doc writer 對齊。
+  - W9 script log 若未寫 Doc 且有錯誤，會輸出 `[warn] 未寫 podcast Google Doc：...`。
+  - `docs/n8n_setup.md` 的 W9 Normalize Success 建議把 `error_message` 映射為 `script.google_doc_error || ""`。
+- 驗證：
+  - `.venv/bin/python -m unittest tests.test_rss_podcast_audio_service tests.test_rss_publish_package_service tests.test_rss_podcast_script_service tests.test_podcast_doc_writer tests.test_podcasts_api` → **24/24 pass**。

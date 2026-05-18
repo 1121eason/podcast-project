@@ -528,10 +528,11 @@ def generate_daily_podcast_script(
 
         google_doc_id = None
         google_doc_url = None
+        google_doc_error = None
         if write_google_doc:
             try:
                 from app.services.podcast_doc_writer import write_podcast_script_to_doc
-                google_doc_id, google_doc_url = write_podcast_script_to_doc(
+                google_doc_id, google_doc_url, google_doc_error = write_podcast_script_to_doc(
                     briefing_date=briefing.briefing_date,
                     episode_title=validated["episode_title"],
                     script=validated["script"],
@@ -543,6 +544,7 @@ def generate_daily_podcast_script(
                     validation_warnings=validated["validation_warnings"],
                 )
             except Exception as exc:
+                google_doc_error = str(exc)
                 logger.warning("Podcast Google Doc write skipped: %s", exc)
 
         podcast = RssPodcastScript(
@@ -562,6 +564,7 @@ def generate_daily_podcast_script(
             validation_warnings=validated["validation_warnings"],
             google_doc_id=google_doc_id,
             google_doc_url=google_doc_url,
+            google_doc_error=google_doc_error,
             model=model_used,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -586,6 +589,7 @@ def generate_daily_podcast_script(
 def _compose_podcast_script_log_summary(result: dict[str, object]) -> list[str]:
     segments = result.get("segments") if isinstance(result.get("segments"), list) else []
     retry_count = int(result.get("script_retry_count") or 0)
+    google_doc_error = str(result.get("google_doc_error") or "")
     doc_status = "已寫 podcast Google Doc" if result.get("google_doc_url") else "未寫 podcast Google Doc"
     lines = [
         tagged(
@@ -601,7 +605,10 @@ def _compose_podcast_script_log_summary(result: dict[str, object]) -> list[str]:
         lines.append(tagged("warn", f"script validation retry {retry_count} 次，請抽查 JSON 格式與 segments。"))
     else:
         lines.append(tagged("ok", "script validation 一次通過。"))
-    lines.append(tagged("ok", doc_status + "。"))
+    if google_doc_error:
+        lines.append(tagged("warn", f"{doc_status}：{google_doc_error[:220]}。"))
+    else:
+        lines.append(tagged("ok", doc_status + "。"))
     lines.append(
         tagged(
             "cost",
