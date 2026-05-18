@@ -1050,3 +1050,263 @@
     - `rss_signals.impact_centroid`
     - `rss_signals.context_centroid`
   - W4 穩定 24h 後，再打開 W5 Verify/Judge；不要同時啟動多個 W4 schedule 搶同一批 pending item。
+
+## 2026/05/18 10:55 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W5 Verify/Judge n8n bring-up 規劃、payload/log mapping 驗證與 production 小流量 smoke test。
+- 背景：W4 已穩定到 `limit_items=50` + `article_extraction=selective`，開始準備 W5 workflow。先讀 `docs/AI-log.md` 最新 W4 記錄與 `docs/n8n_setup.md`，再對照 `app/api/routes_signals.py`、`rss_verification_service.py`、`rss_importance_service.py` 的實際 schema。
+- API payload 驗證：
+  - W5 Verify：`POST /signals/verify` 接受 `{ "since_hours": int, "force": bool }`；不支援 `run_bucket`，也不走 `workflow_runs` idempotency。
+  - W5 Judge：`POST /signals/judge` 接受 `{ "since_hours": int, "max_workers": int, "force": bool, "max_signals_per_run": int, "quality_gate": "supported_or_promoted", "run_bucket": string, "model_overrides": optional }`；會寫 `workflow_runs/signal_judge_<run_bucket>`，retry 同 bucket 會回 `skipped_duplicate=true`。
+  - Production 正式建議仍維持：Verify `{ "since_hours": 24, "force": false }`；Judge `{ "since_hours": 4, "max_workers": 5, "force": false, "max_signals_per_run": 200, "quality_gate": "supported_or_promoted", "run_bucket": "UTC_HOUR_FLOOR" }`。
+- n8n log mapping：
+  - 已在 `docs/n8n_setup.md` 新增 `W5 n8n Implementation Notes`，含 Build W5 Payload、Verify/Judge HTTP node 設定、IF 條件、成功 normalize code、extra columns、error branch 注意事項。
+  - Verify row：`workflow=W5_verify`，`primary_count_1=verified_signal_count`，`primary_count_2=skipped_already_verified_count`，tokens/cost 為 0，`workflow_run_id` 留空。
+  - Judge row：`workflow=W5_judge`，`primary_count_1=judged_signal_count`，`primary_count_2=failed_signal_count`，tokens/cost 使用 `total_input_tokens` / `total_output_tokens` / `total_cost_usd`，`workflow_run_id=response.workflow_run_id`。
+- Production smoke test：
+  - 先讀 `/signals/recent?hours=6&limit=5`，確認近 6 小時有 W4 新 signal 且多數尚未 verified/judged。
+  - Verify smoke body `{ "since_hours": 6, "force": false }`：`total_signal_count=32`、`verified_signal_count=32`、`skipped_already_verified_count=0`；status 分布 `single_source=29, partially_supported=2, regional_only=1`；heat 分布 `low=29, medium=3`；`duration_ms=36256`；`log_summary_version=1`。
+  - Judge smoke body `{ "since_hours": 6, "max_workers": 1, "force": false, "max_signals_per_run": 3, "quality_gate": "supported_or_promoted", "run_bucket": "manual_w5_judge_smoke_20260518T0045Z" }`：`candidate_signal_count=3`、`judged_signal_count=3`、`failed_signal_count=0`、`skipped_quality_gate_count=22`、`avg_score=40.0`、score buckets `40-59=2, <40=1`、tokens `5787/5426`、`total_cost_usd=0.012299`、`judge_model=gpt-5-mini`、`duration_ms=65555`。
+  - Duplicate smoke：同一個 Judge `run_bucket` 重打，回 `skipped_duplicate=true`、`workflow_status=completed`、`[skip] W5 Judge run_bucket ... 已完成或正在執行`，確認 retry 不會重跑 LLM。
+- 注意事項：
+  - Production 目前 `model_routing.w5_judgement.source=env` 且模型是 `gpt-5-mini`，不是較早文件預設的 Gemini Flash。若要改回 Gemini，需要用 Zeabur env 或 `/admin/model-routing` runtime config 調整。
+  - Verify 近 6 小時 32 筆耗時 36.3s，正式 24 小時第一次跑可能更久；n8n Verify timeout 建議至少 180s。
+  - Judge smoke 顯示 quality gate 有效：25 個 verified 後只有 3 個進模型，22 個 low-value singleton 被擋。
+
+## 2026/05/18 11:25 - Codex 更新
+- 更新者：Codex
+- 進度：開始協助 production 上線環境 setup，完成 preflight 與 Google Sheet log 分頁準備。
+- Preflight：
+  - Repo 目前有未提交變更：`docs/AI-log.md`、`docs/n8n_setup.md` 是 W5 文件；`.claude/settings.json` 是既有變更，未觸碰。
+  - n8n `/rest/settings` 已確認 timezone 為 `Australia/Brisbane`，先前 `Asia/Taipei` 問題已消失。
+  - `/admin/model-routing` 已確認 `runtime_config.enabled=true`；effective routes 目前由 env 決定：W5 `gpt-5-mini/medium`、W6 `gpt-5-mini/high`、W8/W9 `gpt-5/medium`。注意 W6 env 仍是 high，與先前降到 medium 的成本優化方向不一致，等 W6 上線前再調。
+- Google Sheet `Informative.AI_RSS Management`：
+  - 原有分頁：`RSS List`、`RSS Candidates`、`Sync_Log`、`Ingest_Log`、`Clustering_Log`、`Judgement_Log`、`BusinessImpact_Log`、`Briefing_Log` 等。
+  - 新增 log 分頁：`Verify_Log`、`Signal_Process_Log`、`Impact_Log`。
+  - 已寫入標準 header：
+    - `Verify_Log`：標準 log 欄位 + `total_signal_count`、`status_distribution`、`heat_distribution`。
+    - `Signal_Process_Log`：標準 log 欄位 + W4 v2 metrics（candidate/processed/embedded/article/thin/adjudication）。
+    - `Impact_Log`：標準 log 欄位 + W6 monitoring 欄位。
+  - `Judgement_Log` 保留既有 128 列 legacy 資料與舊欄位，並追加 W5 v2 所需欄位（`logged_at`、`timestamp_brisbane`、`workflow`、`run_bucket`、`status`、`input_tokens`、`output_tokens`、`cost_usd`、`primary_count_1`、`primary_count_2`、`workflow_run_id`、`log_summary`、`error_message`、`skipped_quality_gate_count`、`judge_model`、`model_routing`、`guard_rails_triggered`）。
+- 下一步：
+  - 在 n8n 建立 `W5 Verify + Judge` workflow，先用 duplicate-safe manual bucket 測 HTTP + Sheets 寫入，再替換成正式 hourly payload 並啟用 schedule。
+
+## 2026/05/18 16:20 - Codex 更新
+- 更新者：Codex
+- 進度：完成 n8n W5 workflow 手動 smoke 寫入與 `Judgement_Log` 表格重整。
+- n8n 手動測試：
+  - `Verify_Log` 成功寫入 1 行：`workflow=W5_verify`、`status=success`、`run_bucket=manual_w5_judge_smoke_20260518T0045Z`、`primary_count_1=0`、`primary_count_2=32`。
+  - `Judgement_Log` 成功寫入 1 行：`workflow=W5_judge`、`status=skipped_duplicate`、`workflow_run_id=signal_judge_manual_w5_judge_smoke_20260518T0045Z`、`primary_count_1=3`、`primary_count_2=0`。
+- Google Sheet 整理：
+  - 使用者確認舊 `Judgement_Log` legacy 資料不需要保留後，已將 `Judgement_Log` 重置為 v2-only 表格。
+  - 目前 `Judgement_Log` 只有 26 個欄位：`logged_at`、`timestamp_brisbane`、`workflow`、`run_bucket`、`status`、`duration_ms`、`input_tokens`、`output_tokens`、`cost_usd`、`primary_count_1`、`primary_count_2`、`workflow_run_id`、`log_summary`、`error_message`、`candidate_signal_count`、`skipped_already_judged_count`、`skipped_unverified_count`、`skipped_quality_gate_count`、`avg_score`、score buckets、`judge_model`、`model_routing`、`guard_rails_triggered`。
+  - 已保留一筆 smoke row 作為 n8n 欄位驗證樣本；舊 legacy 欄位與舊資料已清除。
+- 下一步：
+  - 在 n8n 的 `Append row: Judgement_Log` node 重新 refresh fields，確認只看到 v2 欄位。
+  - 將 `Build W5 Payload` 從 fixed smoke bucket 改成正式 hourly bucket，先 manual run 一次 production-like workflow，再 activate schedule。
+
+## 2026/05/18 16:30 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W5 production-like manual run，確認正式 hourly bucket 與 Sheet 寫入。
+- n8n workflow 狀態：
+  - `Build W5 Payload` 已改為正式 UTC hourly bucket，例如 `2026_05_18T0600Z`。
+  - `HTTP Request: Judge` 已改為 `{{ JSON.stringify($("Build W5 Payload").first().json.judge_body) }}`，不再使用 fixed smoke body。
+- production-like manual run 結果：
+  - `Verify_Log` 新增 row：`run_bucket=2026_05_18T0600Z`、`status=success`、`total_signal_count=35`、`verified_signal_count=3`、`skipped_already_verified_count=32`、`status_distribution={"single_source":3}`、`heat_distribution={"low":3}`、`duration_ms=6964`。
+  - `Judgement_Log` 新增 row：`run_bucket=2026_05_18T0600Z`、`status=success`、`workflow_run_id=signal_judge_2026_05_18T0600Z`、`candidate_signal_count=0`、`judged_signal_count=0`、`failed_signal_count=0`、tokens `0/0`、cost `$0`、`judge_model=gpt-5-mini`、`duration_ms=1648`。
+  - `model_routing` 再次確認 W5 目前為 env `openai/gpt-5-mini/medium`。
+- 判讀：
+  - W5 workflow 可以安全 activate；這次 0 candidate 是正常結果，表示 quality gate / already judged 狀態沒有額外候選需要送 LLM。
+  - 每小時正式排程建議先保持 W5 只開 Verify/Judge，不急著同時打開 W6，觀察 24h 後再接 W6。
+
+## 2026/05/18 16:40 - Codex 更新
+- 更新者：Codex
+- 進度：開始 W6 Business Impact 上線準備，完成 API/schema preflight、`Impact_Log` 整理、direct production smoke。
+- API/schema：
+  - Endpoint：`POST /signals/business-impact`
+  - Payload 接受：`since_hours`、`min_score`、`max_workers`、`force`、`max_signals_per_run`、`run_bucket`、`model_overrides`。
+  - W6 會從近 N 小時 `importance_score >= min_score` 且尚未 `impact_judged_at` 的 signal 中挑候選；正式設定仍建議 `min_score=60`，smoke 可用 `50` 驗證模型路徑。
+- Model routing：
+  - production env 目前 `w6_business_impact=openai/gpt-5-mini/high`，但本機/文件優化方向是 `medium`。
+  - 決策：W6 n8n payload 先帶 request-level `model_overrides`，強制 `gpt-5-mini/medium`；這比馬上改 Zeabur env 安全，也能在 response `model_routing.source=request` 直接觀測。
+- Google Sheet：
+  - `Impact_Log` 已重置為 W6 v2-only header，共 27 欄：標準 log 欄位 + `candidate_signal_count`、skip counters、`impact_model`、4 個平均 list 長度、2 個空欄位 count、`avg_counterfactual_chars`、`avg_gap_note_chars`、`model_routing`。
+- Direct API smoke：
+  - Body：`since_hours=24`、`min_score=50`、`max_workers=1`、`max_signals_per_run=1`、`run_bucket=manual_w6_impact_smoke_20260518T0635Z`、`model_overrides.w6_business_impact={openai,gpt-5-mini,medium}`。
+  - Result：`candidate_signal_count=1`、`analyzed_signal_count=1`、`failed_signal_count=0`、tokens `473/2005`、cost `$0.004128`、duration `22.8s`、`impact_model=gpt-5-mini`、`model_routing.source=request`。
+  - Health metrics：`avg_sectors=5.0`、`avg_assets=4.0`、`avg_regions=4.0`、`avg_watch_points=5.0`、`empty_counterfactual=0`、`empty_gap_note=0`、`avg_counterfactual_chars=30.0`、`avg_gap_note_chars=25.0`。
+  - Duplicate smoke 同 bucket 回 `skipped_duplicate=true`，確認 retry 不會重跑 LLM。
+- 文件：
+  - `docs/n8n_setup.md` 已新增 `W6 n8n Implementation Notes`，含 Build W6 Payload、Normalize Success/Error、Impact_Log mapping、smoke 結果。
+- 下一步：
+  - 在 n8n 建立 `W6 Business Impact` workflow，先用 duplicate-safe smoke bucket 手動寫入 `Impact_Log`，再改正式 hourly payload 做 production-like manual run。
+
+## 2026/05/18 17:05 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W6 n8n workflow smoke 寫入與 production-like manual run。
+- n8n smoke 寫入：
+  - `Impact_Log` 已成功寫入 duplicate-safe smoke row：`run_bucket=manual_w6_impact_smoke_20260518T0635Z`、`status=skipped_duplicate`、`primary_count_1=1`、`primary_count_2=0`、`workflow_run_id=business_impact_manual_w6_impact_smoke_20260518T0635Z`。
+  - 欄位落點已讀回確認：`model_routing` 記錄為 request override `openai/gpt-5-mini/medium`。
+- production-like manual run：
+  - `Build W6 Payload` 已改正式 hourly bucket，例如 `2026_05_18T0700Z`。
+  - 正式 body：`since_hours=24`、`min_score=60`、`max_workers=5`、`force=false`、`max_signals_per_run=100`、`run_bucket=UTC_HOUR_FLOOR`，並保留 `model_overrides.w6_business_impact={provider:openai, model:gpt-5-mini, reasoning_effort:medium}`。
+  - `Impact_Log` 新增 row：`run_bucket=2026_05_18T0700Z`、`status=success`、`candidate_signal_count=0`、`analyzed_signal_count=0`、`failed_signal_count=0`、tokens `0/0`、cost `$0`、`workflow_run_id=business_impact_2026_05_18T0700Z`、`duration_ms=4892`。
+  - `model_routing.source=request`，確認 production-like W6 不受 env `high` 影響。
+- 判讀：
+  - W6 workflow 可以安全 activate；目前 0 candidate 是正常結果，因為近 24h 尚無 `importance_score >= 60` 且未分析的 signal。
+  - 上線後先看 `candidate_signal_count` 是否跟 W5 高分 signal 對齊；若連續 24h 都是 0，要回頭看 W5 quality gate / score threshold，而不是 W6 本身。
+
+## 2026/05/18 17:15 - Codex 更新
+- 更新者：Codex
+- 進度：開始 W7 Daily Consolidation 上線準備，完成 API/schema preflight、`Consolidate_Log` 建立、direct production smoke。
+- API/schema：
+  - Endpoint：`POST /signals/consolidate-daily`
+  - Payload 接受：`since_hours`、`story_lookback_days`、`max_threads`、`run_bucket`、`model_overrides`。
+  - W7 會寫 `rss_story_threads`、`rss_thread_phases`，並更新 signal 的 `thread_id`、`today_delta`、`novelty_score`、`last_consolidated_at` 等欄位；因此 smoke 使用 `max_threads=1` 控制寫入範圍。
+- Google Sheet：
+  - 新增 `Consolidate_Log`，重置為 W7 v2-only header，共 39 欄：標準 log 欄位 + thread counters、refine token/cost、phase counters、samples、`model_routing`。
+- Direct API smoke：
+  - Body：`since_hours=24`、`story_lookback_days=30`、`max_threads=1`、`run_bucket=manual_w7_consolidate_smoke_20260518T0710Z`。
+  - Result：`signals_considered=1`、`threads_updated=1`、`threads_created=1`、`today_delta_count=1`、`phases_upserted=1`、`phase_heuristic_assignments=1`、`phase_llm_calls=0`、`model_refined_count=0`、phase/refine cost `$0`、`duration_ms=9210`。
+  - Samples：thread/phase 都是 `W.H.O. Declares Ebola Outbreak a Global Health Emergency`。
+  - Duplicate smoke 同 bucket 回 `skipped_duplicate=true`，確認 retry 不會重跑 consolidation。
+- 文件：
+  - `docs/n8n_setup.md` 已新增 `W7 n8n Implementation Notes`，含 Build W7 Payload、Normalize Success/Error、Consolidate_Log mapping、smoke 結果。
+- 下一步：
+  - 在 n8n 建立 `W7 Daily Consolidation` workflow，先用 duplicate-safe smoke bucket 手動寫入 `Consolidate_Log`，再改正式 daily payload 做 production-like manual run。
+
+## 2026/05/18 17:35 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W7 Daily Consolidation n8n production-like manual run，確認正式 daily payload、Sheet 寫入與 warning 可觀測。
+- production-like manual run：
+  - `run_bucket=DAILY_2026_05_18`
+  - `status=success`
+  - `workflow_run_id=daily_consolidation_DAILY_2026_05_18`
+  - `duration_ms=311231`，約 311.2 秒。
+  - `signals_considered=35`、`threads_updated=7`、`threads_created=4`、`today_delta_count=35`。
+  - `model_refined_count=10`，refine tokens `3889/4358`，refine cost `$0.048441`。
+  - `phases_upserted=7`、`phases_created=0`、`phases_advanced=1`。
+  - `phase_heuristic_assignments=33`、`phase_w4_evidence_assignments=0`、`phase_llm_calls=1`、phase tokens `513/144`、phase cost `$0.000082`。
+  - `thread_mismatch_flagged_count=1`，sample：`sigv2_20260517_ad55ddddb4`。
+  - Total observed cost：`$0.048523`。
+- 判讀：
+  - W7 workflow 可進入 daily schedule；production-like 不是空跑，已實際整理 35 個 signals 與 7 個 threads。
+  - 因 W7 實跑耗時約 5 分鐘，n8n HTTP Request timeout 建議設 `900000` ms，排程建議 daily，不要 hourly。
+  - `thread_mismatch_flagged_count=1` 是可觀測 warning，先保留，不阻擋上線；後續觀察是否重複出現在同一類 signal。
+
+## 2026/05/18 17:55 - Codex 更新
+- 更新者：Codex
+- 進度：開始 W8 Daily Briefing 上線準備，完成 API/schema preflight、`Briefing_Log` 重整、direct production smoke。
+- API/schema：
+  - Endpoint：`POST /briefings/generate`
+  - Payload 接受：`briefing_date`、`score_threshold`、`max_sections`、`max_signals_input`、`write_google_doc`、`run_bucket`、`model_overrides`。
+  - W8 會讀近 24h `importance_score >= score_threshold` 的 signal，並注入 W7 thread / phase context；validation 失敗時最多 retry 1 次。
+- Preflight：
+  - 近 24h briefing candidates：`score_threshold >= 60` 為 0，因此 2026-05-18 正式 W8 會走 no-candidate path，預期成本 `$0`。
+  - Production response 確認 W8 model routing 目前為 env `openai/gpt-5/medium`；本機 default 仍是 Gemini，但以上線 response 為準。
+- Google Sheet：
+  - 舊 `Briefing_Log` 保留為 `Briefing_Log_Legacy_20260518`。
+  - 新 `Briefing_Log` 已重建為 W8 v2-only header，共 32 欄：標準 log 欄位 + briefing id/date、section/top_change/category counts、四大分類 section counts、retry count、Google Doc URL、model、`model_routing`、`signal_pool_health`。
+- Direct API smoke：
+  - Body：`score_threshold=95`、`max_sections=1`、`max_signals_input=5`、`write_google_doc=false`、`run_bucket=manual_w8_briefing_smoke_20260518T0750Z`。
+  - Result：`selected_signal_count=0`、`total_input_signals=0`、tokens `0/0`、cost `$0`、duration `4.3s`、`google_doc_url=null`。
+  - Duplicate smoke 同 bucket 回 `skipped_duplicate=true`，確認 retry 不會重跑 briefing。
+- 文件：
+  - `docs/n8n_setup.md` 已新增 `W8 n8n Implementation Notes`，含 Build W8 Payload、Normalize Success/Error、Briefing_Log mapping、smoke 結果。
+- 下一步：
+  - 在 n8n 建立 `W8 Daily Briefing` workflow，先用 duplicate-safe smoke bucket 手動寫入 `Briefing_Log`，再改正式 daily payload 做 production-like manual run。
+
+## 2026/05/18 18:12 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W8 Daily Briefing n8n smoke row 與 production-like manual run。
+- n8n smoke 寫入：
+  - `Briefing_Log` 成功寫入 smoke row：`run_bucket=manual_w8_briefing_smoke_20260518T0750Z`、`status=skipped_duplicate`、`workflow_run_id=briefing_generate_manual_w8_briefing_smoke_20260518T0750Z`、`selected_signal_count=0`、tokens `0/0`、cost `$0`。
+  - 欄位落點已讀回確認：`model_routing` 與 `signal_pool_health` 都是 JSON 字串，沒有 n8n literal expression。
+- production-like manual run：
+  - `Build W8 Payload` 已改正式 daily bucket：`DAILY_2026_05_18`。
+  - 正式 body：`score_threshold=60`、`max_sections=10`、`max_signals_input=80`、`write_google_doc=true`、`run_bucket=DAILY_2026_05_18`。
+  - `Briefing_Log` 新增 row：`status=success`、`workflow_run_id=briefing_generate_DAILY_2026_05_18`、`briefing_id=brief_20260518_0551ec`、`briefing_date=2026-05-18`、`selected_signal_count=0`、`total_input_signals=0`、tokens `0/0`、cost `$0`、`duration_ms=4041`。
+  - `google_doc_url` 為空，符合 no-candidate path；`model=gpt-5`、`model_routing.source=env`。
+- 判讀：
+  - W8 workflow 可以安全 activate；今天 0 candidate 是正常結果，不代表 workflow 失敗。
+  - 若未來 W8 有 candidate，會打 `gpt-5/medium` 並寫 Google Doc；需觀察 `briefing_retry_count`、`section_count`、`top_change_count` 和 `google_doc_url`。
+
+## 2026/05/18 18:35 - Codex 更新
+- 更新者：Codex
+- 進度：開始 W9 Daily Podcast 上線準備，完成 API/schema preflight、`Podcast_Log` 建立、no-content direct smoke。
+- API/schema：
+  - Endpoint：`POST /podcasts/run-daily`
+  - Payload 接受：`briefing_id`、`write_google_doc`、`force_audio`、`force_package`、`run_bucket`、`model_overrides`。
+  - W9 `run-daily` 會依序執行 podcast script、TTS audio、publish package，且內部自動拆成 `<run_bucket>_script`、`<run_bucket>_audio`、`<run_bucket>_package` 三個子桶。
+- Preflight：
+  - 最新 briefing 是 `brief_20260518_0551ec`，`selected_signal_count=0`、無 sections/top_changes。
+  - 目前 production 尚無 `rss_podcast_scripts`。
+  - 因今天 W8 是 no-candidate path，W9 正式 daily run 會在 script step 因 `briefing has no content` 擋下，預期成本 `$0`；這是安全保護，不是 workflow 壞掉。
+- Google Sheet：
+  - 新增 `Podcast_Log`，共 36 欄：標準 log 欄位 + run/script/episode/package ids、`failed_step`、script word/retry/model/cost/doc、audio URL/GCS/duration/size/TTS、source URL count、episode title、`model_routing`。
+- Direct API no-content smoke：
+  - Body：`write_google_doc=false`、`force_audio=false`、`force_package=false`、`run_bucket=manual_w9_podcast_no_content_smoke_20260518T0820Z`。
+  - Result：HTTP 500，detail：`briefing brief_20260518_0551ec has no content`。
+  - 後端 `workflow_runs/podcast_run_daily_manual_w9_podcast_no_content_smoke_20260518T0820Z` 已記錄：`status=failed`、`failed_step=script`、`cost_usd=0`、`duration_ms=4527`、`model_routing=openai/gpt-5/medium`。
+- 文件：
+  - `docs/n8n_setup.md` 已新增 `W9 n8n Implementation Notes`，含 Build W9 Payload、Normalize Success/Error、Podcast_Log mapping、no-content smoke 結果。
+- 下一步：
+  - 在 n8n 建立 `W9 Daily Podcast` workflow，先用 no-content smoke bucket 手動驗證 error branch 寫入 `Podcast_Log`；成功生成音訊的 full run 等 W8 有非空 briefing 後再跑。
+
+## 2026/05/18 23:50 - Codex 更新
+- 更新者：Codex
+- 進度：完成 W9 Daily Podcast n8n no-content smoke row 與 production-like manual run。
+- n8n smoke 寫入：
+  - `Podcast_Log` 成功寫入 no-content smoke row：`run_bucket=manual_w9_podcast_no_content_smoke_20260518T0820Z`、`status=failed`、`failed_step=script`、`cost_usd=0`、`workflow_run_id=podcast_run_daily_manual_w9_podcast_no_content_smoke_20260518T0820Z`。
+  - 欄位落點已讀回確認：沒有 n8n literal expression；`failed_step=script` 正確。
+- production-like manual run：
+  - `Build W9 Payload` 已改正式 daily bucket：`DAILY_2026_05_18`。
+  - 正式 body：`write_google_doc=true`、`force_audio=false`、`force_package=false`、`run_bucket=DAILY_2026_05_18`。
+  - `Podcast_Log` 新增 row：`status=failed`、`failed_step=script`、`cost_usd=0`、`workflow_run_id=podcast_run_daily_DAILY_2026_05_18`、error：`briefing brief_20260518_0551ec has no content`。
+  - 後端 `workflow_runs/podcast_run_daily_DAILY_2026_05_18` 已記錄結構化 failure summary：`duration_ms=5166`、`failed_step=script`、`cost_usd=0`、`model_routing=openai/gpt-5/medium`。
+- 判讀：
+  - W9 workflow error branch 已驗證，可以安全 activate；今天失敗是預期 no-content guard，不是 workflow 壞掉。
+  - 後續第一個有內容 briefing 的日子，W9 會第一次跑 full path：script → TTS → publish package；那天需要人工抽查 audio URL、Google Doc、source URL count、script word count。
+  - 目前 n8n error row 的 `duration_ms` / `model_routing` 仍是 fallback 值（0 / `{}`），若要更完整可加 Firestore read `workflow_runs/<workflow_run_id>` 補 summary；不阻擋上線。
+
+## 2026/05/19 00:05 - Codex 更新
+- 更新者：Codex
+- 進度：整理 Google Sheet `Informative.AI_RSS Management`，刪除不再記錄的舊分頁，並檢查晚間 workflow logs。
+- Sheet cleanup：
+  - 已刪除 4 張不再記錄的舊報表 / 一次性研究分頁：`Daily_Report`、`RSS Probe Research`、`RSS Gap Analysis`、`RSS Migration Audit`。
+  - 已將 spreadsheet timezone 從 `Asia/Taipei` 改為 `Australia/Brisbane`，與 n8n / briefing timezone 對齊。
+  - 保留 `Clustering_Log`：雖然是 legacy 名稱，但晚間仍有 W4 寫入，暫時不能刪。
+- 晚間 logs 觀察：
+  - W2 `Ingest_Log`：23:01 / 23:31 都有 success，新增 86 / 107 items；但每次 success 後又追加一筆 `failed HTTP 500: unknown error`。疑似 W2 n8n 有多一條 error branch 被錯接，或有另一個舊 W2 workflow 同時啟用。
+  - W4：每小時 :10 寫入 `Clustering_Log`，但 `Signal_Process_Log` 仍沒有資料。log_summary 顯示 endpoint/service 是 W4 signal_process，但 n8n Sheets target 還是舊 `Clustering_Log`，且近幾輪都處理 `0/0` item。需檢查 W4 workflow 的 Google Sheets node target 與 payload。
+  - W5：23:30 同一 hourly bucket 寫入 3 組 Verify/Judge；Judge 只有第一筆 success，後兩筆 duplicate skip，成本為 0。疑似 schedule/手動/舊 workflow 重複觸發，會污染表但不花 LLM。
+  - W6：19:45–23:45 每小時 success，candidate 0、cost 0，正常。
+  - W7：daily production-like success，仍保留 1 個 thread mismatch warning：`sigv2_20260517_ad55ddddb4`。
+  - W8：daily success，selected 0、cost 0，no-candidate path 正常。
+  - W9：daily failed at `script`，原因 `briefing ... has no content`，cost 0；這是 no-content guard，非事故。
+- 關注事項：
+  1. 先修 W2 雙寫 failed row。
+  2. 再修 W4 寫入目標：應寫 `Signal_Process_Log`，不是 `Clustering_Log`；並確認 W4 為何在 W2 新增 item 後仍處理 `0/0`。
+  3. W5 保留一個 hourly trigger 即可，避免同 bucket 一小時寫三次。
+  4. 可把 W9 no-content error 在 n8n normalize 成 `skipped_no_content`，避免日後 dashboard 把正常空日視為紅燈。
+
+## 2026/05/19 00:37 - Codex 更新
+- 更新者：Codex
+- 進度：定位並修復 W4 `0/0` 的根因，補上 regression tests，並更新 n8n 操作文件。
+- 現象：
+  - W4 Google Sheets target 已改到 `Signal_Process_Log`，不再寫入 `Clustering_Log`。
+  - Manual run `manual_w4_limit100_20260518T141428Z` 成功：candidate/processed `41/41`、寫入 `29` signals、抽文 `32`、thin dropped `3`、adjudication `19` 次、cost `$0.043307`、duration `520.8s`。
+  - 接著正式 bucket `2026_05_18T1430Z` 仍回 `0/0`；同時 W2 在 `14:31:31Z` 才完成新增 `110` items，而 W4 row 是 `14:31:23Z`，代表 schedule 太貼近 W2。
+- 根因：
+  - `app/clients/firestore_client.py::list_rss_items_pending_v2_processing()` 原本對 Firestore 先 `.limit(limit)`，再在 Python 過濾 `v2_processed_at + event_embedding_hash` 已完成項目。
+  - 當最近前 50/100 筆剛好都已處理時，W4 會誤判沒有 pending；實測舊邏輯下 `since_hours=24`：`limit50=0`、`limit100=0`、`limit150=55`、`limit250=195`。
+- 修法：
+  - Firestore query 改成依 `first_seen_at` / `published_at` newest-first，先掃較大的 `scan_limit = min(max(limit * 10, 500), 5000)`，再過濾已處理項目，最後只回傳 requested `limit`。
+  - 保留既有 schema，不新增 Firestore migration；長期若要更乾淨可加 `v2_processing_status` / `v2_pending` 欄位後直接 query pending。
+- 驗證：
+  - Local patched check：`since_hours=24 limit50 pending=50`、`limit100 pending=100`。
+  - `.venv/bin/python -m unittest tests.test_firestore_client_batching` → **4/4 pass**。
+- n8n 設定：
+  - 修復部署後正式 W4 回到 `{ "since_hours": 24, "limit_items": 50, "article_extraction": "selective", "canonicalize": "selective" }`。
+  - W4 schedule 建議改成 W2 後 10-15 分鐘，例如 W2 `:00/:30`，W4 `:12/:42` 或 `:15/:45`；避免 W4 在 W2 還沒寫完時先跑。
+  - 若 backend fix 尚未部署，短期 workaround 是 `since_hours=1` + `limit_items=50`，但這只是避開舊 query bug，不是長期設定。

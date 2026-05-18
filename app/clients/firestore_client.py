@@ -309,8 +309,16 @@ class FirestoreClient:
 
         collection = self.db.collection("rss_items")
         items_by_id: dict[str, RssItem] = {}
+        # Firestore cannot filter "missing v2_processed_at OR missing event_embedding_hash"
+        # directly without adding a dedicated status field. Scan a wider recent window,
+        # then apply the pending filter in Python and return the requested limit.
+        scan_limit = min(max(limit * 10, 500), 5000)
         for field in ("first_seen_at", "published_at"):
-            query = collection.where(filter=FieldFilter(field, ">=", since_iso)).limit(limit)
+            query = (
+                collection.where(filter=FieldFilter(field, ">=", since_iso))
+                .order_by(field, direction=firestore.Query.DESCENDING)
+                .limit(scan_limit)
+            )
             for doc in query.stream():
                 data = doc.to_dict() or {}
                 if not data:
@@ -321,6 +329,8 @@ class FirestoreClient:
                 items_by_id[item.item_id] = item
                 if len(items_by_id) >= limit:
                     break
+            if len(items_by_id) >= limit:
+                break
         return list(items_by_id.values())[:limit]
 
     def update_rss_item_v2_fields(self, item_updates: dict[str, dict]) -> int:
