@@ -60,9 +60,10 @@ class PodcastAudioServiceTest(unittest.TestCase):
         self.assertEqual(request["parent"], "projects/project-id/locations/global")
         self.assertEqual(request["voice"]["language_code"], "cmn-TW")
         self.assertEqual(request["voice"]["name"], "cmn-TW-Chirp3-HD-Charon")
+        self.assertEqual(request["audio_config"]["audio_encoding"], rss_podcast_audio_service.texttospeech.AudioEncoding.LINEAR16)
         self.assertEqual(
             request["output_gcs_uri"],
-            "gs://audio-bucket/podcasts/2026-05-09/podcast_20260509_abc123.mp3",
+            "gs://audio-bucket/podcasts/2026-05-09/podcast_20260509_abc123.wav",
         )
         operation.result.assert_called_once()
         self.assertEqual(result["episode_id"], "episode_podcast_20260509_abc123")

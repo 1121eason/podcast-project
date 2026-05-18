@@ -1469,6 +1469,12 @@ Before switching to formal daily payload, refresh the Google Sheets node fields 
 - This is safe to activate: on no-content days W9 should fail fast at script with zero cost; on content days it should continue through script, TTS audio, and publish package.
 - Optional future improvement: add a Firestore read in the error branch to fetch `workflow_runs/<workflow_run_id>.summary` so `duration_ms`, clean `log_summary`, and `model_routing` are copied into `Podcast_Log`.
 
+2026-05-19 W9 full-path note:
+
+- First content day reached the audio stage and failed with Google Long Audio Synthesis `400 Audio encoding MP3 is currently unsupported... only LINEAR16 audio encodings are supported`.
+- Backend fix: podcast audio now uses `texttospeech.AudioEncoding.LINEAR16` and writes `.wav` objects, not `.mp3`.
+- No n8n payload change is required. After deploy, re-run W9 with a fresh manual bucket or wait for the next daily bucket.
+
 ## Failure / Error Branch
 
 **只有 W9 `run-daily` 在 raise 之前會把 `failure_summary`（含 `log_summary`）寫進 `workflow_runs` 文件**（[rss_podcast_run_service.py](app/services/rss_podcast_run_service.py)）。其他 6 個 service 在 exception path 直接 raise，n8n 收到 HTTP 5xx、response body 通常不含 `log_summary`。

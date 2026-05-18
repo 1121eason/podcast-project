@@ -1310,3 +1310,28 @@
   - 修復部署後正式 W4 回到 `{ "since_hours": 24, "limit_items": 50, "article_extraction": "selective", "canonicalize": "selective" }`。
   - W4 schedule 建議改成 W2 後 10-15 分鐘，例如 W2 `:00/:30`，W4 `:12/:42` 或 `:15/:45`；避免 W4 在 W2 還沒寫完時先跑。
   - 若 backend fix 尚未部署，短期 workaround 是 `since_hours=1` + `limit_items=50`，但這只是避開舊 query bug，不是長期設定。
+
+## 2026/05/19 07:40 - Codex 更新
+- 更新者：Codex
+- 進度：檢查 overnight logs，確認 W2/W4/W5/W6/W7/W8 已大致穩定，並定位 W9 full-path 第一個 audio-stage failure。
+- Overnight logs：
+  - W2：`15:15Z` 後 12 筆全為 `success`，不再雙寫 failed row。
+  - W4：已不再 `0/0`，多數正式 bucket 處理 `50/50`；`2026_05_18T1600Z` 有 1 筆 transient SSL `bad record mac`，後續 bucket 正常。
+  - W5：Verify/Judge 每小時基本各一筆；`2026_05_18T1500Z` 還有 1 筆修正前 duplicate skip，之後乾淨。
+  - W6：有候選才花錢，0 candidate runs cost 為 0。
+  - W7：`DAILY_2026_05_19` success，整合 173 signals 到 7 threads。
+  - W8：`DAILY_2026_05_19` success，選入 `32/71` signals，輸出 `14` sections / `6` top changes，cost `$0.20829`。
+- W4 吞吐量觀察：
+  - W4 每小時 `limit_items=50` 跑得動，但 W2 每 30 分鐘新增量高，pending 仍累積：近 1 小時約 212、近 6 小時約 831、近 24 小時超過 1000。
+  - 建議下一步把 W4 schedule 改為每 30 分鐘（W2 後 10-15 分鐘，例如 `:15/:45`），先不調高 `limit_items`。
+- W9 full-path failure：
+  - `Podcast_Log` row：`run_bucket=DAILY_2026_05_19`、`status=failed`、error：`400 Audio encoding MP3 is currently unsupported. Temporarily, only LINEAR16 audio encodings are supported for Long Audio Synthesis.`
+  - 判讀：W9 已成功越過 no-content guard 並進入 audio stage，失敗點是 backend TTS encoding，不是 n8n 接線。
+- 修法：
+  - `rss_podcast_audio_service._audio_object_path()` 改 `.mp3` → `.wav`。
+  - `synthesize_long_audio.audio_config.audio_encoding` 改 `MP3` → `LINEAR16`。
+  - `tests/test_rss_podcast_audio_service.py` 補 assertion：Long Audio request 必須用 `LINEAR16` 且 output GCS URI 為 `.wav`。
+- 驗證：
+  - `.venv/bin/python -m unittest tests.test_rss_podcast_audio_service tests.test_rss_publish_package_service tests.test_rss_podcast_script_service tests.test_podcasts_api` → **22/22 pass**。
+- 後續：
+  - deploy 後用 fresh manual W9 bucket 重跑 full path，或等下一個 daily bucket；不需要改 n8n payload。

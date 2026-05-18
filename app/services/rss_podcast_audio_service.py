@@ -21,7 +21,7 @@ def _episode_id(script_id: str) -> str:
 
 
 def _audio_object_path(podcast: RssPodcastScript) -> str:
-    return f"podcasts/{podcast.briefing_date}/{podcast.script_id}.mp3"
+    return f"podcasts/{podcast.briefing_date}/{podcast.script_id}.wav"
 
 
 def _gcs_uri(bucket: str, object_path: str) -> str:
@@ -101,7 +101,9 @@ def synthesize_podcast_audio(
                     "language_code": settings.PODCAST_TTS_LANGUAGE_CODE,
                     "name": settings.PODCAST_TTS_VOICE,
                 },
-                "audio_config": {"audio_encoding": texttospeech.AudioEncoding.MP3},
+                # Long Audio Synthesis currently accepts LINEAR16 only; using
+                # MP3 returns a 400 before any audio is generated.
+                "audio_config": {"audio_encoding": texttospeech.AudioEncoding.LINEAR16},
                 "output_gcs_uri": output_uri,
             }
         )
