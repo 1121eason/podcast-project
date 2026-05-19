@@ -98,6 +98,40 @@ class PodcastScriptServiceTest(unittest.TestCase):
         self.assertEqual(result["episode_title"], "2026/05/09-全球資金重新定價 AI")
         self.assertIn("episode_title fallback used", result["validation_warnings"])
 
+    def test_spoken_style_issues_flag_report_labels(self):
+        rigid_unit = (
+            "一、AI 供應鏈重新定價。\n"
+            "發生什麼：市場開始重新評估 AI 資本支出。\n"
+            "為什麼重要：這會影響雲端與半導體投資。\n"
+            "影響誰：雲商、晶片供應鏈與企業採購。\n"
+            "接下來看什麼：後續財報與資本支出指引。\n"
+        )
+        script = (
+            "歡迎回到 Informative AI。\n\n"
+            + rigid_unit * 60
+            + "感謝各位今天的收聽，明天見。"
+        )
+
+        issues = rss_podcast_script_service._spoken_style_issues(script)
+
+        self.assertTrue(any("四問標籤" in issue for issue in issues))
+        self.assertTrue(any("條列大綱" in issue for issue in issues))
+
+    def test_spoken_style_issues_accept_natural_host_copy(self):
+        natural_unit = (
+            "我們先看 AI 供應鏈這件事。"
+            "你可以把它想成市場在重新安排資本支出的順序。"
+            "這裡的重點不是單一公司多花了多少錢，而是雲端、電力和晶片供應鏈會一起被重新定價。"
+            "換句話說，接下來真正值得聽的，是企業怎麼談交付時程和毛利壓力。"
+        )
+        script = (
+            "歡迎回到 Informative AI。"
+            + natural_unit * 35
+            + "感謝各位今天的收聽，明天見。"
+        )
+
+        self.assertEqual(rss_podcast_script_service._spoken_style_issues(script), [])
+
 
 class FakeFirestore:
     def __init__(self, signals=None, threads=None, phases=None, podcast_scripts=None, briefings=None):
@@ -245,6 +279,16 @@ def make_yesterday_podcast() -> RssPodcastScript:
 
 
 class TestThreadAndPhaseInjection(unittest.TestCase):
+    def test_prompt_treats_four_questions_as_internal_checklist(self):
+        briefing = make_threaded_briefing()
+        fake = FakeFirestore()
+        with patch.object(rss_podcast_script_service, "firestore_client", fake):
+            prompt = rss_podcast_script_service._render_prompt(briefing)
+
+        self.assertIn("四問是你的「寫作檢查表」，不是朗讀格式", prompt)
+        self.assertIn("最終 script 絕對不要出現", prompt)
+        self.assertIn("像主持人連續講解", prompt)
+
     def test_thread_groups_built_from_briefing_referenced_signals(self):
         briefing = make_threaded_briefing()
         signal = make_signal_in_thread("sig_1", "thread_a")
@@ -425,6 +469,61 @@ class TestRetryOnValidationFailure(unittest.TestCase):
         self.assertEqual(flaky.calls, 2)
         self.assertEqual(retry_count, 1)
         self.assertTrue(validated["script"].startswith("歡迎回到 Informative AI"))
+
+    def test_retry_succeeds_after_first_stiff_spoken_style_payload(self):
+        briefing = make_threaded_briefing()
+        signal = make_signal_in_thread("sig_1", "thread_a")
+        rigid_unit = (
+            "一、OpenAI Microsoft 算力爭議。\n"
+            "發生什麼：OpenAI 要求更多算力。\n"
+            "為什麼重要：企業客戶會重新評估交付能力。\n"
+            "影響誰：OpenAI、Microsoft、雲端供應鏈。\n"
+            "接下來看什麼：合約條款與算力配額。\n"
+        )
+        natural_unit = (
+            "我們先看 OpenAI 和 Microsoft 這條線。"
+            "你可以把它想成 AI 需求開始碰到雲端產能的天花板。"
+            "這裡的重點不是誰在談判桌上比較強勢，而是企業客戶會怎麼評估交付風險。"
+            "換句話說，接下來要聽的不是口號，是合約裡對算力和時程的承諾。"
+        )
+        bad = self._valid_payload()
+        bad["script"] = (
+            "歡迎回到 Informative AI。\n\n"
+            + rigid_unit * 60
+            + "感謝各位今天的收聽，明天見。"
+        )
+        good = self._valid_payload()
+        good["script"] = (
+            "歡迎回到 Informative AI。"
+            + natural_unit * 35
+            + "感謝各位今天的收聽，明天見。"
+        )
+
+        class StiffThenGoodGemini:
+            def __init__(self):
+                self.calls = 0
+                self.prompts = []
+
+            def generate_json(self, prompt, model="gemini-2.5-pro"):
+                self.calls += 1
+                self.prompts.append(prompt)
+                if self.calls == 1:
+                    return bad, 1500, 400
+                return good, 1600, 450
+
+        model = StiffThenGoodGemini()
+        fake = FakeFirestore(signals=[signal])
+        with patch.object(rss_podcast_script_service, "firestore_client", fake), \
+             patch.object(rss_podcast_script_service, "gemini_client", model), \
+             patch.object(rss_podcast_script_service.openai_client, "client", None):
+            validated, _, _, _, _, retry_count = (
+                rss_podcast_script_service._generate_script_with_retry(briefing)
+            )
+
+        self.assertEqual(model.calls, 2)
+        self.assertEqual(retry_count, 1)
+        self.assertNotIn("發生什麼：", validated["script"])
+        self.assertIn("文稿不像可朗讀口語稿", model.prompts[1])
 
     def test_generate_script_returns_log_summary(self):
         briefing = make_threaded_briefing()

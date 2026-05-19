@@ -4,7 +4,7 @@
 
 本專案是一個基於 FastAPI 與 Google AI (Gemini) 的每日高訊號情資發佈包系統，MVP 受眾為投資人、商務決策者與創業經營者。
 
-Phase 5 之後，系統會以全自動觀察流程產生 Podcast 文稿、選配 Google Doc 備份稿、Google TTS MP3 音訊與手動上架用發佈包。Google Doc 只作為檢視與備份，不是人工審稿關卡。
+Phase 5 之後，系統會以全自動觀察流程產生 Podcast 文稿、選配 Google Doc 備份稿、TTS 音訊與手動上架用發佈包。預設音訊為 OpenAI 雙主持 production 試跑版本；Google TTS 路徑仍可用環境變數切回。Google Doc 只作為檢視與備份，不是人工審稿關卡。
 
 預期規劃部署於 GCP Cloud Run，利用 Cloud Scheduler 每日定時觸發 `/briefings/generate` 與 `/podcasts/run-daily` 端點。
 
@@ -42,6 +42,8 @@ mv podcast-project-491300-af5203fc737b.json ~/.config/signal-brief/service-accou
 GOOGLE_APPLICATION_CREDENTIALS="/Users/eason/.config/signal-brief/service-account.json"
 ADMIN_TOKEN="your-local-admin-token"
 GCS_AUDIO_BUCKET="your-podcast-audio-bucket"
+OPENAI_API_KEY="your-openai-api-key"
+PODCAST_TTS_PROVIDER="openai"
 ```
 
 > **注意：** 執行此系統需要對應的 Google Cloud Service Account 憑證 (`GOOGLE_APPLICATION_CREDENTIALS`) 並開啟 Docs, Drive, Firestore, Text-to-Speech 及 Gemini API 權限。

@@ -39,10 +39,69 @@ WORD_COUNT_TARGET_LOW = 6500
 WORD_COUNT_TARGET_HIGH = 7500
 MANDATORY_OPENING = "歡迎回到 Informative AI。"
 MANDATORY_CLOSING = "感謝各位今天的收聽，明天見。"
+SPOKEN_STYLE_MIN_CHARS = 3000
+RIGID_REPORT_LABELS = (
+    "發生什麼：",
+    "為什麼重要：",
+    "影響誰：",
+    "接下來看什麼：",
+    "接下來看：",
+)
+CONVERSATIONAL_MARKERS = (
+    "我們",
+    "你",
+    "先停一下",
+    "換句話說",
+    "問題是",
+    "可以這樣看",
+    "你可能會想",
+    "這裡",
+    "重點不是",
+    "更白話",
+    "放到你的決策",
+)
+HEADING_LINE_RE = re.compile(r"^\s*(?:[一二三四五六七八九十]+[、.]|\d+[).、]|[-•])\s*")
 
 
 def _spoken_char_count(text: str) -> int:
     return sum(1 for ch in text if not ch.isspace())
+
+
+def _sentence_lengths(text: str) -> list[int]:
+    sentences = [s.strip() for s in re.split(r"[。！？!?]\s*|\n+", text) if s.strip()]
+    return [_spoken_char_count(s) for s in sentences]
+
+
+def _spoken_style_issues(script: str) -> list[str]:
+    """Detect report-like scripts that will sound stiff when read by TTS."""
+    if _spoken_char_count(script) < SPOKEN_STYLE_MIN_CHARS:
+        return []
+
+    issues: list[str] = []
+    label_hits = sum(script.count(label) for label in RIGID_REPORT_LABELS)
+    if label_hits >= 3:
+        issues.append(
+            "四問標籤出現在朗讀稿中；請把發生什麼/重要性/影響對象/後續觀察融合成自然段落"
+        )
+
+    heading_lines = [
+        line for line in script.splitlines()
+        if HEADING_LINE_RE.match(line) and not line.lstrip().startswith("來源")
+    ]
+    if len(heading_lines) >= 6:
+        issues.append("朗讀稿仍像條列大綱；請改成主持人口吻的連續敘述")
+
+    conversational_hits = sum(script.count(marker) for marker in CONVERSATIONAL_MARKERS)
+    if conversational_hits < 12:
+        issues.append("第二人稱與自然轉場不足；請加入像真人主持人對聽眾說話的承接句")
+
+    lengths = _sentence_lengths(script)
+    if lengths:
+        long_sentences = [length for length in lengths if length >= 90]
+        if len(long_sentences) >= max(8, int(len(lengths) * 0.12)):
+            issues.append("長句比例過高；請拆成更短、更適合 TTS 呼吸的句子")
+
+    return issues
 
 
 def _date_prefix(briefing_date: str) -> str:
@@ -461,6 +520,19 @@ def _generate_script_with_retry(
         total_out += out_tok
         try:
             validated = _validate_script_payload(payload, briefing)
+            style_issues = _spoken_style_issues(validated["script"])
+            if style_issues:
+                if attempt == 0:
+                    last_error = "文稿不像可朗讀口語稿：" + "；".join(style_issues)
+                    logger.warning(
+                        "podcast_script_spoken_style_retry attempt=%d issues=%s",
+                        attempt + 1,
+                        " | ".join(style_issues),
+                    )
+                    continue
+                validated["validation_warnings"].extend(
+                    f"spoken_style_issue: {issue}" for issue in style_issues
+                )
             return validated, payload, total_in, total_out, model_used, attempt
         except ValueError as exc:
             last_error = str(exc)[:200]

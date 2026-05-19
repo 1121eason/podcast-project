@@ -46,10 +46,18 @@ class Settings(BaseSettings):
     DAILY_CONSOLIDATION_MODEL_GEMINI: str = "gemini-2.5-pro"
 
     GCS_AUDIO_BUCKET: str = ""
+    PODCAST_TTS_PROVIDER: str = "openai"
     PODCAST_TTS_VOICE: str = "cmn-TW-Wavenet-B"
     PODCAST_TTS_LANGUAGE_CODE: str = "cmn-TW"
+    PODCAST_TTS_INPUT_MODE: str = "text"
     PODCAST_TTS_LOCATION: str = "global"
     PODCAST_TTS_TIMEOUT_SECONDS: int = 1800
+    PODCAST_OPENAI_DIALOGUE_MODEL: str = "gpt-5-mini"
+    PODCAST_OPENAI_DIALOGUE_REASONING_EFFORT: str = "low"
+    PODCAST_OPENAI_TTS_MODEL: str = "gpt-4o-mini-tts"
+    PODCAST_OPENAI_TTS_MALE_VOICE: str = "cedar"
+    PODCAST_OPENAI_TTS_FEMALE_VOICE: str = "shimmer"
+    PODCAST_OPENAI_TTS_SPEED: float = 1.25
 
     ADMIN_TOKEN: Optional[str] = None
     GOOGLE_WORKSPACE_AUTH_MODE: str = "default"
